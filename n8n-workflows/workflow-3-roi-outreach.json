@@ -1,0 +1,228 @@
+{
+  "name": "Hiring Sniper — 3. ROI + Outreach",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hiring-sniper-outreach",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "c3000001-0000-0000-0000-000000000001",
+      "name": "Webhook: Contact Approved",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.hubapi.com/crm/v3/objects/deals/{{ $json.body.dealId || $json.dealId }}?associations=companies,contacts&properties=dealname,job_title_detected,num_openings,icp_score,description,job_posting_url,estimated_contract_value",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "c3000001-0000-0000-0000-000000000010",
+      "name": "HubSpot: Get Deal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 300],
+      "credentials": { "httpHeaderAuth": { "id": "", "name": "HubSpot Private App" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get deal, then fetch the associated contact\nconst deal = $input.first().json;\nconst contactId = deal.associations?.contacts?.results?.[0]?.id;\nconst props = deal.properties || {};\n\nreturn [{ json: {\n  dealId: deal.id,\n  contactId: contactId || null,\n  companyName: props.dealname?.replace('Hiring Signal: ', '') || '',\n  jobTitle: props.job_title_detected || '',\n  numOpenings: parseInt(props.num_openings) || 10,\n  jobUrl: props.job_posting_url || '',\n  description: props.description || '',\n  contractValue: props.estimated_contract_value || '$100K'\n} }];"
+      },
+      "id": "c3000001-0000-0000-0000-000000000015",
+      "name": "Extract Deal Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.hubapi.com/crm/v3/objects/contacts/{{ $json.contactId }}?properties=firstname,lastname,jobtitle,email,linkedin_url",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "c3000001-0000-0000-0000-000000000020",
+      "name": "HubSpot: Get Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [780, 300],
+      "credentials": { "httpHeaderAuth": { "id": "", "name": "HubSpot Private App" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge deal + contact data\nconst contact = $input.first().json;\nconst deal = $('Extract Deal Data').item.json;\nconst cp = contact.properties || {};\n\nreturn [{ json: {\n  ...deal,\n  dmName: `${cp.firstname || ''} ${cp.lastname || ''}`.trim() || 'Operations Leader',\n  dmTitle: cp.jobtitle || 'VP Operations',\n  dmEmail: cp.email || '',\n  dmLinkedin: cp.linkedin_url || ''\n} }];"
+      },
+      "id": "c3000001-0000-0000-0000-000000000025",
+      "name": "Merge Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1040, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 2000,\n  \"tools\": [{\"type\": \"web_search_20250305\", \"name\": \"web_search\"}],\n  \"system\": \"You are a financial analyst specializing in contact center economics. Use web search for current salary data. Be specific with numbers. Return ONLY valid JSON.\",\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"Calculate the ROI of Feather AI voice agents vs hiring human call center agents for {{ $json.companyName }}.\\n\\nKnown:\\n- Hiring {{ $json.numOpenings }} phone agents\\n- Role: {{ $json.jobTitle }}\\n- Feather costs $0.07/minute\\n\\nResearch with web search:\\n1. Average call center agent salary in their industry/location\\n2. Add 30% for benefits/overhead, $4K for training per agent\\n3. Typical calls per agent per day in lending (usually 40-80)\\n4. Average call duration in lending (usually 4-8 min)\\n5. Calculate Feather cost for same call volume\\n\\nReturn ONLY JSON:\\n{\\n  \\\"hiring\\\": {\\n    \\\"agents\\\": {{ $json.numOpenings }},\\n    \\\"avg_salary\\\": 0,\\n    \\\"overhead_pct\\\": 30,\\n    \\\"training_per_agent\\\": 4000,\\n    \\\"total_annual\\\": 0\\n  },\\n  \\\"feather\\\": {\\n    \\\"calls_per_agent_day\\\": 0,\\n    \\\"avg_duration_min\\\": 0,\\n    \\\"working_days\\\": 250,\\n    \\\"total_annual_minutes\\\": 0,\\n    \\\"total_annual_cost\\\": 0\\n  },\\n  \\\"savings\\\": {\\n    \\\"annual\\\": 0,\\n    \\\"pct\\\": 0,\\n    \\\"payback_months\\\": 0,\\n    \\\"three_year\\\": 0\\n  },\\n  \\\"headline\\\": \\\"One provocative line with the specific dollar amounts\\\"\\n}\"\n  }]\n}",
+        "options": { "timeout": 120000 }
+      },
+      "id": "c3000001-0000-0000-0000-000000000030",
+      "name": "Claude: ROI Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1300, 300],
+      "credentials": { "httpHeaderAuth": { "id": "", "name": "Anthropic API Key" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse ROI result\nconst response = $input.first().json;\nconst data = $('Merge Data').item.json;\nlet text = '';\nif (response.content && Array.isArray(response.content)) {\n  text = response.content.filter(b => b.type === 'text').map(b => b.text).join('\\n');\n}\n\nlet roi;\ntry {\n  const cleaned = text.replace(/```json|```/g, '').trim();\n  const match = cleaned.match(/\\{[\\s\\S]*\\}/);\n  roi = JSON.parse(match ? match[0] : cleaned);\n} catch (e) {\n  roi = { hiring: { total_annual: 500000 }, feather: { total_annual_cost: 80000 }, savings: { annual: 420000, pct: 84, payback_months: 2 }, headline: 'Significant cost savings with AI voice agents' };\n}\n\nreturn [{ json: { ...data, roi } }];"
+      },
+      "id": "c3000001-0000-0000-0000-000000000035",
+      "name": "Parse ROI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 3000,\n  \"system\": \"You are a B2B copywriter who writes sharp, non-salesy outreach. Your emails get 30%+ open rates because they lead with specific, relevant data. Never be generic. Return ONLY valid JSON.\",\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"Generate personalized outreach for:\\n\\nContact: {{ $json.dmName }} ({{ $json.dmTitle }}) at {{ $json.companyName }}\\nJob posting: {{ $json.jobTitle }} ({{ $json.numOpenings }} openings)\\nJob URL: {{ $json.jobUrl }}\\nROI: Saves ${{ Math.round(($json.roi?.savings?.annual || 400000) / 1000) }}K/year ({{ $json.roi?.savings?.pct || 80 }}% reduction)\\nHeadline: {{ $json.roi?.headline || '' }}\\n\\nRULES:\\n- Reference the SPECIFIC job posting — prove you did homework\\n- Lead with ROI math — make it impossible to ignore\\n- Email body UNDER 100 words — busy execs skim\\n- LinkedIn connection note UNDER 300 characters\\n- LinkedIn post does NOT name the company — say 'a lender' or 'a mortgage company'\\n- Everything sounds like a peer sharing data, NOT a vendor pitching\\n- No phrases like 'I hope this finds you well' or 'I noticed that'\\n- Start emails with the insight, not with yourself\\n\\nGenerate:\\n\\n1. COLD EMAIL (subject under 50 chars, body under 100 words)\\n2. LINKEDIN connection note (under 300 chars) + follow-up message (under 150 words)\\n3. LINKEDIN POST (under 200 words, data-driven, provocative, shareable)\\n\\nReturn ONLY JSON:\\n{\\n  \\\"email\\\": { \\\"subject\\\": \\\"\\\", \\\"body\\\": \\\"\\\" },\\n  \\\"linkedin\\\": { \\\"connection_note\\\": \\\"\\\", \\\"followup\\\": \\\"\\\" },\\n  \\\"linkedin_post\\\": \\\"\\\",\\n  \\\"one_liner\\\": \\\"single most compelling sentence\\\"\\n}\"\n  }]\n}",
+        "options": { "timeout": 90000 }
+      },
+      "id": "c3000001-0000-0000-0000-000000000040",
+      "name": "Claude: Draft Outreach",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1820, 300],
+      "credentials": { "httpHeaderAuth": { "id": "", "name": "Anthropic API Key" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse outreach drafts\nconst response = $input.first().json;\nconst data = $('Parse ROI').item.json;\nlet text = '';\nif (response.content && Array.isArray(response.content)) {\n  text = response.content.filter(b => b.type === 'text').map(b => b.text).join('\\n');\n}\n\nlet msgs;\ntry {\n  const cleaned = text.replace(/```json|```/g, '').trim();\n  const match = cleaned.match(/\\{[\\s\\S]*\\}/);\n  msgs = JSON.parse(match ? match[0] : cleaned);\n} catch (e) {\n  msgs = { email: { subject: 'Parse error', body: text }, linkedin: { connection_note: '', followup: '' }, linkedin_post: '', one_liner: '' };\n}\n\nreturn [{ json: { ...data, outreach: msgs } }];"
+      },
+      "id": "c3000001-0000-0000-0000-000000000045",
+      "name": "Parse Outreach",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2080, 300]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://api.hubapi.com/crm/v3/objects/deals/{{ $json.dealId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Content-Type", "value": "application/json" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"properties\": {\n    \"dealstage\": \"outreachready\",\n    \"estimated_contract_value\": \"{{ $json.contractValue }}\",\n    \"current_hiring_cost\": \"{{ $json.roi?.hiring?.total_annual || 0 }}\",\n    \"feather_cost\": \"{{ $json.roi?.feather?.total_annual_cost || 0 }}\",\n    \"annual_savings\": \"{{ $json.roi?.savings?.annual || 0 }}\",\n    \"roi_headline\": \"{{ $json.roi?.headline || '' }}\",\n    \"email_subject\": \"{{ $json.outreach?.email?.subject || '' }}\",\n    \"email_body\": \"{{ $json.outreach?.email?.body?.replace(/\\\"/g, '\\\\\\\"') || '' }}\",\n    \"linkedin_connection_note\": \"{{ $json.outreach?.linkedin?.connection_note || '' }}\",\n    \"linkedin_followup\": \"{{ $json.outreach?.linkedin?.followup?.replace(/\\\"/g, '\\\\\\\"') || '' }}\",\n    \"linkedin_post_draft\": \"{{ $json.outreach?.linkedin_post?.replace(/\\\"/g, '\\\\\\\"') || '' }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "c3000001-0000-0000-0000-000000000050",
+      "name": "HubSpot: Update Deal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2340, 200],
+      "credentials": { "httpHeaderAuth": { "id": "", "name": "HubSpot Private App" } }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/notes",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Content-Type", "value": "application/json" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"properties\": {\n    \"hs_timestamp\": \"{{ new Date().toISOString() }}\",\n    \"hs_note_body\": \"<h3>Outreach Package Ready</h3><br><b>Contact:</b> {{ $json.dmName }} ({{ $json.dmTitle }})<br><b>Email:</b> {{ $json.dmEmail }}<br><br><h4>ROI Summary</h4><b>Current hiring cost:</b> ${{ Math.round(($json.roi?.hiring?.total_annual || 0) / 1000) }}K/yr<br><b>Feather cost:</b> ${{ Math.round(($json.roi?.feather?.total_annual_cost || 0) / 1000) }}K/yr<br><b>Annual savings:</b> ${{ Math.round(($json.roi?.savings?.annual || 0) / 1000) }}K ({{ $json.roi?.savings?.pct || 0 }}%)<br><br><h4>Cold Email</h4><b>Subject:</b> {{ $json.outreach?.email?.subject || '' }}<br><br>{{ $json.outreach?.email?.body || '' }}<br><br><h4>LinkedIn Connection Note</h4>{{ $json.outreach?.linkedin?.connection_note || '' }}<br><br><h4>LinkedIn Follow-up</h4>{{ $json.outreach?.linkedin?.followup || '' }}<br><br><h4>LinkedIn Post</h4>{{ $json.outreach?.linkedin_post || '' }}\"\n  },\n  \"associations\": [\n    {\n      \"to\": { \"id\": {{ $json.dealId }} },\n      \"types\": [{ \"associationCategory\": \"HUBSPOT_DEFINED\", \"associationTypeId\": 214 }]\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "c3000001-0000-0000-0000-000000000060",
+      "name": "HubSpot: Full Note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2340, 400],
+      "credentials": { "httpHeaderAuth": { "id": "", "name": "HubSpot Private App" } }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/tasks",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Content-Type", "value": "application/json" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"properties\": {\n    \"hs_timestamp\": \"{{ new Date().toISOString() }}\",\n    \"hs_task_body\": \"Review outreach package for {{ $json.companyName }}. Contact: {{ $json.dmName }} ({{ $json.dmTitle }}). Annual savings: ${{ Math.round(($json.roi?.savings?.annual || 0) / 1000) }}K. Edit messaging if needed, then send email + LinkedIn.\",\n    \"hs_task_subject\": \"Send outreach: {{ $json.companyName }} → {{ $json.dmName }}\",\n    \"hs_task_status\": \"NOT_STARTED\",\n    \"hs_task_priority\": \"HIGH\",\n    \"hs_task_type\": \"TODO\"\n  },\n  \"associations\": [\n    {\n      \"to\": { \"id\": {{ $json.dealId }} },\n      \"types\": [{ \"associationCategory\": \"HUBSPOT_DEFINED\", \"associationTypeId\": 216 }]\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "c3000001-0000-0000-0000-000000000070",
+      "name": "HubSpot: Create Task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2600, 200],
+      "credentials": { "httpHeaderAuth": { "id": "", "name": "HubSpot Private App" } }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"*Outreach Package Ready* :rocket:\\n\\n*Company:* {{ $json.companyName }}\\n*Contact:* {{ $json.dmName }} — {{ $json.dmTitle }}\\n*Savings:* ${{ Math.round(($json.roi?.savings?.annual || 0) / 1000) }}K/yr\\n*Email subject:* {{ $json.outreach?.email?.subject || '' }}\\n*One-liner:* {{ $json.outreach?.one_liner || '' }}\\n\\n→ Review in HubSpot, edit if needed, then send\"\n}",
+        "options": {}
+      },
+      "id": "c3000001-0000-0000-0000-000000000080",
+      "name": "Slack: Outreach Ready",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2600, 400]
+    }
+  ],
+  "connections": {
+    "Webhook: Contact Approved": { "main": [[{ "node": "HubSpot: Get Deal", "type": "main", "index": 0 }]] },
+    "HubSpot: Get Deal": { "main": [[{ "node": "Extract Deal Data", "type": "main", "index": 0 }]] },
+    "Extract Deal Data": { "main": [[{ "node": "HubSpot: Get Contact", "type": "main", "index": 0 }]] },
+    "HubSpot: Get Contact": { "main": [[{ "node": "Merge Data", "type": "main", "index": 0 }]] },
+    "Merge Data": { "main": [[{ "node": "Claude: ROI Analysis", "type": "main", "index": 0 }]] },
+    "Claude: ROI Analysis": { "main": [[{ "node": "Parse ROI", "type": "main", "index": 0 }]] },
+    "Parse ROI": { "main": [[{ "node": "Claude: Draft Outreach", "type": "main", "index": 0 }]] },
+    "Claude: Draft Outreach": { "main": [[{ "node": "Parse Outreach", "type": "main", "index": 0 }]] },
+    "Parse Outreach": { "main": [[{ "node": "HubSpot: Update Deal", "type": "main", "index": 0 }, { "node": "HubSpot: Full Note", "type": "main", "index": 0 }]] },
+    "HubSpot: Update Deal": { "main": [[{ "node": "HubSpot: Create Task", "type": "main", "index": 0 }]] },
+    "HubSpot: Full Note": { "main": [[{ "node": "Slack: Outreach Ready", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}

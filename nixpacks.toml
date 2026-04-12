@@ -1,0 +1,5 @@
+[phases.build]
+cmds = ["npm install", "npx vite build"]
+
+[start]
+cmd = "node server.js"

@@ -1,0 +1,238 @@
+{
+  "name": "Hiring Sniper — 1. Scan & Qualify",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "hours", "hoursInterval": 24 }] } },
+      "id": "a1000001-0000-0000-0000-000000000001",
+      "name": "Daily 7AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {},
+      "id": "a1000001-0000-0000-0000-000000000002",
+      "name": "Manual Run",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 500]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 3000,\n  \"tools\": [{\"type\": \"web_search_20250305\", \"name\": \"web_search\"}],\n  \"system\": \"You are a hiring signal intelligence agent. Use web search to find REAL current job postings from real companies. Return ONLY valid JSON — no markdown, no backticks, no explanation.\",\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"Search the web for companies in the US mortgage, lending, insurance, and credit union industries that are CURRENTLY hiring for call center agents, phone support representatives, loan servicing phone agents, or similar phone-based roles.\\n\\nFind 6-10 real companies with actual open job postings right now. For each, find:\\n- The real company name\\n- The exact job title from the posting\\n- Location\\n- Estimated number of similar openings at that company\\n- The URL of the job posting if possible\\n- Which sub-industry they're in\\n\\nReturn ONLY this JSON:\\n{\\n  \\\"signals\\\": [\\n    {\\n      \\\"company\\\": \\\"real company name\\\",\\n      \\\"role_title\\\": \\\"exact job title\\\",\\n      \\\"location\\\": \\\"city, state\\\",\\n      \\\"num_openings\\\": 5,\\n      \\\"job_url\\\": \\\"url or empty string\\\",\\n      \\\"industry\\\": \\\"mortgage/lending/insurance/credit_union\\\",\\n      \\\"signal_strength\\\": \\\"high/medium/low\\\"\\n    }\\n  ]\\n}\"\n  }]\n}",
+        "options": { "timeout": 120000 }
+      },
+      "id": "a1000001-0000-0000-0000-000000000010",
+      "name": "Claude: Scan Signals",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [300, 400],
+      "credentials": { "httpHeaderAuth": { "id": "", "name": "Anthropic API Key" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Claude response into individual signals\nconst response = $input.first().json;\nlet text = '';\n\nif (response.content && Array.isArray(response.content)) {\n  text = response.content\n    .filter(b => b.type === 'text')\n    .map(b => b.text)\n    .join('\\n');\n}\n\nlet parsed;\ntry {\n  const cleaned = text.replace(/```json|```/g, '').trim();\n  // Try to find JSON object in the response\n  const match = cleaned.match(/\\{[\\s\\S]*\\}/);\n  parsed = JSON.parse(match ? match[0] : cleaned);\n} catch (e) {\n  return [{ json: { error: 'Failed to parse signals: ' + e.message, raw: text } }];\n}\n\nif (!parsed.signals || !parsed.signals.length) {\n  return [{ json: { error: 'No signals found', raw: text } }];\n}\n\n// Return each signal as a separate item for looping\nreturn parsed.signals.map(signal => ({ json: signal }));"
+      },
+      "id": "a1000001-0000-0000-0000-000000000020",
+      "name": "Parse Signals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [560, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 2000,\n  \"tools\": [{\"type\": \"web_search_20250305\", \"name\": \"web_search\"}],\n  \"system\": \"You are a B2B sales qualification agent for Feather (featherhq.com), an AI voice calling platform for lending/finance. Score companies against our ICP. Return ONLY valid JSON.\",\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"Research {{ $json.company }} and qualify them for Feather's AI voice platform.\\n\\nScore on 5 dimensions (0-2 each, 10 max):\\n\\n1. INDUSTRY FIT: mortgage/lending/insurance/credit union = 2, adjacent finance = 1, other = 0\\n2. SIZE FIT: 500+ employees or $50M+ revenue = 2, 100-500 employees = 1, <100 = 0\\n3. PHONE INTENSITY: dedicated call center or 5+ phone openings = 2, some phone roles = 1, none = 0\\n4. NO EXISTING AI VOICE: no Vapi/Retell/Bland/Synthflow = 2, has basic IVR = 1, already uses AI voice = 0\\n5. TIMING: posting < 14 days old or 5+ openings = 2, 14-30 days = 1, older = 0\\n\\nHARD DISQUALIFIERS (auto-reject):\\n- Already uses Vapi, Retell, Bland, Synthflow, or similar AI voice\\n- Fewer than 50 employees\\n- Government entity\\n- Not US/Canada\\n\\nThey are hiring for: {{ $json.role_title }} ({{ $json.num_openings }} openings) in {{ $json.location }}\\nIndustry guess: {{ $json.industry }}\\n\\nReturn ONLY this JSON:\\n{\\n  \\\"company\\\": \\\"{{ $json.company }}\\\",\\n  \\\"scores\\\": {\\n    \\\"industry\\\": 0,\\n    \\\"size\\\": 0,\\n    \\\"phone_intensity\\\": 0,\\n    \\\"no_existing_solution\\\": 0,\\n    \\\"timing\\\": 0\\n  },\\n  \\\"total_score\\\": 0,\\n  \\\"qualified\\\": true,\\n  \\\"hard_disqualifier\\\": null,\\n  \\\"employees\\\": \\\"estimate\\\",\\n  \\\"revenue\\\": \\\"estimate\\\",\\n  \\\"has_existing_ai_voice\\\": false,\\n  \\\"existing_solution\\\": \\\"none\\\",\\n  \\\"estimated_contract_value\\\": \\\"$100K\\\",\\n  \\\"phone_infrastructure\\\": \\\"what we know\\\",\\n  \\\"reasoning\\\": \\\"2-3 sentences\\\"\\n}\"\n  }]\n}",
+        "options": { "timeout": 120000 }
+      },
+      "id": "a1000001-0000-0000-0000-000000000030",
+      "name": "Claude: Qualify ICP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [820, 400],
+      "credentials": { "httpHeaderAuth": { "id": "", "name": "Anthropic API Key" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse qualification result and merge with original signal\nconst response = $input.first().json;\nconst signal = $('Parse Signals').item.json;\n\nlet text = '';\nif (response.content && Array.isArray(response.content)) {\n  text = response.content.filter(b => b.type === 'text').map(b => b.text).join('\\n');\n}\n\nlet qual;\ntry {\n  const cleaned = text.replace(/```json|```/g, '').trim();\n  const match = cleaned.match(/\\{[\\s\\S]*\\}/);\n  qual = JSON.parse(match ? match[0] : cleaned);\n} catch (e) {\n  qual = { qualified: false, hard_disqualifier: 'Parse error', total_score: 0 };\n}\n\nreturn [{\n  json: {\n    // Signal data\n    company: signal.company,\n    role_title: signal.role_title,\n    location: signal.location,\n    num_openings: signal.num_openings,\n    job_url: signal.job_url || '',\n    industry: signal.industry,\n    signal_strength: signal.signal_strength,\n    // Qualification data\n    total_score: qual.total_score || 0,\n    qualified: qual.qualified === true && !qual.hard_disqualifier && (qual.total_score || 0) >= 6,\n    hard_disqualifier: qual.hard_disqualifier || null,\n    employees: qual.employees || 'unknown',\n    revenue: qual.revenue || 'unknown',\n    has_existing_ai_voice: qual.has_existing_ai_voice || false,\n    existing_solution: qual.existing_solution || 'none',\n    estimated_contract_value: qual.estimated_contract_value || '$100K',\n    phone_infrastructure: qual.phone_infrastructure || 'unknown',\n    reasoning: qual.reasoning || '',\n    scores: qual.scores || {},\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "a1000001-0000-0000-0000-000000000040",
+      "name": "Parse Qualification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1080, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "" },
+          "conditions": [
+            {
+              "id": "qual-check",
+              "leftValue": "={{ $json.qualified }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "a1000001-0000-0000-0000-000000000050",
+      "name": "Qualified?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/companies",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"properties\": {\n    \"name\": \"{{ $json.company }}\",\n    \"industry\": \"{{ $json.industry }}\",\n    \"numberofemployees\": \"{{ $json.employees }}\",\n    \"annualrevenue\": \"{{ $json.revenue }}\",\n    \"description\": \"Hiring Signal: {{ $json.role_title }} ({{ $json.num_openings }} openings) in {{ $json.location }}. ICP Score: {{ $json.total_score }}/10. {{ $json.reasoning }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "a1000001-0000-0000-0000-000000000060",
+      "name": "HubSpot: Create Company",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1600, 300],
+      "credentials": { "httpHeaderAuth": { "id": "", "name": "HubSpot Private App" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare deal creation payload with the company ID\nconst companyId = $('HubSpot: Create Company').item.json.id;\nconst data = $('Parse Qualification').item.json;\n\nreturn [{ json: { companyId, ...data } }];"
+      },
+      "id": "a1000001-0000-0000-0000-000000000065",
+      "name": "Prep Deal Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1860, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/deals",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"properties\": {\n    \"dealname\": \"Hiring Signal: {{ $json.company }}\",\n    \"dealstage\": \"qualifiedpendingreview\",\n    \"pipeline\": \"hiring_signal_pipeline\",\n    \"amount\": \"{{ $json.estimated_contract_value }}\",\n    \"description\": \"Signal: {{ $json.role_title }} ({{ $json.num_openings }} openings)\\nLocation: {{ $json.location }}\\nICP Score: {{ $json.total_score }}/10\\nIndustry: {{ $json.industry }}\\nEmployees: {{ $json.employees }}\\nRevenue: {{ $json.revenue }}\\nExisting AI voice: {{ $json.existing_solution }}\\nPhone infra: {{ $json.phone_infrastructure }}\\n\\nReasoning: {{ $json.reasoning }}\",\n    \"signal_source\": \"job_board_scan\",\n    \"job_title_detected\": \"{{ $json.role_title }}\",\n    \"job_posting_url\": \"{{ $json.job_url }}\",\n    \"num_openings\": \"{{ $json.num_openings }}\",\n    \"icp_score\": \"{{ $json.total_score }}\",\n    \"has_existing_solution\": \"{{ $json.has_existing_ai_voice }}\",\n    \"existing_solution_name\": \"{{ $json.existing_solution }}\"\n  },\n  \"associations\": [\n    {\n      \"to\": { \"id\": {{ $json.companyId }} },\n      \"types\": [{ \"associationCategory\": \"HUBSPOT_DEFINED\", \"associationTypeId\": 342 }]\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "a1000001-0000-0000-0000-000000000070",
+      "name": "HubSpot: Create Deal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2120, 300],
+      "credentials": { "httpHeaderAuth": { "id": "", "name": "HubSpot Private App" } }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.hubapi.com/crm/v3/objects/notes",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"properties\": {\n    \"hs_timestamp\": \"{{ new Date().toISOString() }}\",\n    \"hs_note_body\": \"<h3>Hiring Signal Detected</h3><br><b>Company:</b> {{ $('Parse Qualification').item.json.company }}<br><b>Role:</b> {{ $('Parse Qualification').item.json.role_title }}<br><b>Openings:</b> {{ $('Parse Qualification').item.json.num_openings }}<br><b>Location:</b> {{ $('Parse Qualification').item.json.location }}<br><br><b>ICP Score:</b> {{ $('Parse Qualification').item.json.total_score }}/10<br><b>Industry:</b> {{ $('Parse Qualification').item.json.scores.industry }}/2<br><b>Size:</b> {{ $('Parse Qualification').item.json.scores.size }}/2<br><b>Phone intensity:</b> {{ $('Parse Qualification').item.json.scores.phone_intensity }}/2<br><b>No existing solution:</b> {{ $('Parse Qualification').item.json.scores.no_existing_solution }}/2<br><b>Timing:</b> {{ $('Parse Qualification').item.json.scores.timing }}/2<br><br><b>Reasoning:</b> {{ $('Parse Qualification').item.json.reasoning }}\"\n  },\n  \"associations\": [\n    {\n      \"to\": { \"id\": {{ $json.id }} },\n      \"types\": [{ \"associationCategory\": \"HUBSPOT_DEFINED\", \"associationTypeId\": 214 }]\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "a1000001-0000-0000-0000-000000000080",
+      "name": "HubSpot: Add Note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2380, 300],
+      "credentials": { "httpHeaderAuth": { "id": "", "name": "HubSpot Private App" } }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"*New Qualified Hiring Signal* :target:\\n\\n*Company:* {{ $('Parse Qualification').item.json.company }}\\n*ICP Score:* {{ $('Parse Qualification').item.json.total_score }}/10\\n*Hiring:* {{ $('Parse Qualification').item.json.num_openings }}x {{ $('Parse Qualification').item.json.role_title }}\\n*Location:* {{ $('Parse Qualification').item.json.location }}\\n*Est. Contract:* {{ $('Parse Qualification').item.json.estimated_contract_value }}\\n*Industry:* {{ $('Parse Qualification').item.json.industry }}\\n\\n→ Review in HubSpot\"\n}",
+        "options": {}
+      },
+      "id": "a1000001-0000-0000-0000-000000000090",
+      "name": "Slack: Notify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2380, 480]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log rejected company for tracking\nconst data = $('Parse Qualification').item.json;\nreturn [{ json: {\n  status: 'rejected',\n  company: data.company,\n  total_score: data.total_score,\n  reason: data.hard_disqualifier || `Score ${data.total_score}/10 below threshold`,\n  timestamp: new Date().toISOString()\n} }];"
+      },
+      "id": "a1000001-0000-0000-0000-000000000055",
+      "name": "Log Rejection",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1600, 540]
+    }
+  ],
+  "connections": {
+    "Daily 7AM": { "main": [[{ "node": "Claude: Scan Signals", "type": "main", "index": 0 }]] },
+    "Manual Run": { "main": [[{ "node": "Claude: Scan Signals", "type": "main", "index": 0 }]] },
+    "Claude: Scan Signals": { "main": [[{ "node": "Parse Signals", "type": "main", "index": 0 }]] },
+    "Parse Signals": { "main": [[{ "node": "Claude: Qualify ICP", "type": "main", "index": 0 }]] },
+    "Claude: Qualify ICP": { "main": [[{ "node": "Parse Qualification", "type": "main", "index": 0 }]] },
+    "Parse Qualification": { "main": [[{ "node": "Qualified?", "type": "main", "index": 0 }]] },
+    "Qualified?": {
+      "main": [
+        [{ "node": "HubSpot: Create Company", "type": "main", "index": 0 }],
+        [{ "node": "Log Rejection", "type": "main", "index": 0 }]
+      ]
+    },
+    "HubSpot: Create Company": { "main": [[{ "node": "Prep Deal Data", "type": "main", "index": 0 }]] },
+    "Prep Deal Data": { "main": [[{ "node": "HubSpot: Create Deal", "type": "main", "index": 0 }]] },
+    "HubSpot: Create Deal": { "main": [[{ "node": "HubSpot: Add Note", "type": "main", "index": 0 }, { "node": "Slack: Notify", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}

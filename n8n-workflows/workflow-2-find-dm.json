@@ -1,0 +1,179 @@
+{
+  "name": "Hiring Sniper — 2. Find Decision Maker",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hiring-sniper-find-dm",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "b2000001-0000-0000-0000-000000000001",
+      "name": "Webhook: Deal Approved",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.hubapi.com/crm/v3/objects/deals/{{ $json.body.dealId || $json.dealId }}?associations=companies&properties=dealname,job_title_detected,num_openings,icp_score,signal_source,description",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "b2000001-0000-0000-0000-000000000010",
+      "name": "HubSpot: Get Deal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 300],
+      "credentials": { "httpHeaderAuth": { "id": "", "name": "HubSpot Private App" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract deal data and company ID\nconst deal = $input.first().json;\nconst companyId = deal.associations?.companies?.results?.[0]?.id || null;\nconst props = deal.properties || {};\n\nreturn [{ json: {\n  dealId: deal.id,\n  dealName: props.dealname,\n  companyId,\n  companyName: props.dealname?.replace('Hiring Signal: ', '') || 'Unknown',\n  jobTitle: props.job_title_detected || '',\n  numOpenings: props.num_openings || '',\n  description: props.description || ''\n} }];"
+      },
+      "id": "b2000001-0000-0000-0000-000000000020",
+      "name": "Extract Deal Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apollo.io/api/v1/mixed_people/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "X-Api-Key", "value": "={{ $credentials.httpHeaderAuth?.value || '' }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"organization_name\": \"{{ $json.companyName }}\",\n  \"person_titles\": [\n    \"VP Operations\",\n    \"Vice President Operations\",\n    \"SVP Operations\",\n    \"Chief Operating Officer\",\n    \"COO\",\n    \"Director Contact Center\",\n    \"Head of Contact Center\",\n    \"Director Customer Operations\",\n    \"VP Customer Experience\",\n    \"CTO\",\n    \"VP Engineering\",\n    \"Director Loan Servicing\",\n    \"Director Mortgage Operations\",\n    \"Head of Operations\"\n  ],\n  \"person_seniorities\": [\"vp\", \"director\", \"c_suite\"],\n  \"per_page\": 5\n}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "b2000001-0000-0000-0000-000000000030",
+      "name": "Apollo: Find People",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [780, 300],
+      "credentials": { "httpHeaderAuth": { "id": "", "name": "Apollo API Key" } },
+      "notes": "If you don't have Apollo, replace this with a Claude web search node that searches LinkedIn for the decision maker"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Apollo results and extract candidate contacts\nconst response = $input.first().json;\nconst dealData = $('Extract Deal Data').item.json;\nconst people = response.people || response.contacts || [];\n\nif (!people.length) {\n  // No Apollo results — pass to Claude for web search fallback\n  return [{ json: {\n    ...dealData,\n    apolloResults: [],\n    apolloFailed: true,\n    candidateList: 'No results from Apollo — Claude will search the web'\n  } }];\n}\n\nconst candidates = people.slice(0, 5).map(p => ({\n  name: `${p.first_name || ''} ${p.last_name || ''}`.trim(),\n  title: p.title || '',\n  linkedin: p.linkedin_url || '',\n  email: p.email || '',\n  seniority: p.seniority || ''\n}));\n\nconst candidateList = candidates.map((c, i) => \n  `${i+1}. ${c.name} — ${c.title} (${c.seniority}) | LinkedIn: ${c.linkedin} | Email: ${c.email}`\n).join('\\n');\n\nreturn [{ json: {\n  ...dealData,\n  apolloResults: candidates,\n  apolloFailed: false,\n  candidateList\n} }];"
+      },
+      "id": "b2000001-0000-0000-0000-000000000040",
+      "name": "Parse Apollo Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1040, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 2000,\n  \"tools\": [{\"type\": \"web_search_20250305\", \"name\": \"web_search\"}],\n  \"system\": \"You are verifying the right decision maker to buy an AI voice calling platform for a call center. Use web search to verify the person is real, current, and the right level. Return ONLY valid JSON.\",\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": \"Company: {{ $json.companyName }}\\nThey're hiring for: {{ $json.jobTitle }}\\n\\nCandidate contacts found:\\n{{ $json.candidateList }}\\n\\nThe RIGHT decision maker is someone who:\\n- Controls call center / phone operations budget\\n- Can authorize a $100K+ annual software contract\\n- Has a title like VP Operations, COO, Director of Contact Center, CTO\\n- Is NOT: a recruiter, individual agent, someone too junior, or the CEO at a large company\\n- Has been in their current role 3+ months\\n- Is CURRENTLY at this company (not former)\\n\\nFor the BEST candidate, verify via web search:\\n- Are they currently at {{ $json.companyName }}?\\n- Does their LinkedIn show relevant operations/technology scope?\\n- Is their title current?\\n\\nIf Apollo returned no results, search the web to find the right person at {{ $json.companyName }}.\\n\\nReturn ONLY this JSON:\\n{\\n  \\\"best_match\\\": {\\n    \\\"name\\\": \\\"full name\\\",\\n    \\\"title\\\": \\\"current title\\\",\\n    \\\"linkedin_url\\\": \\\"verified URL\\\",\\n    \\\"email\\\": \\\"email if known\\\",\\n    \\\"confidence\\\": \\\"high/medium/low\\\",\\n    \\\"why_this_person\\\": \\\"2 sentences\\\"\\n  },\\n  \\\"backup\\\": {\\n    \\\"name\\\": \\\"backup name\\\",\\n    \\\"title\\\": \\\"backup title\\\",\\n    \\\"linkedin_url\\\": \\\"url\\\"\\n  }\\n}\"\n  }]\n}",
+        "options": { "timeout": 120000 }
+      },
+      "id": "b2000001-0000-0000-0000-000000000050",
+      "name": "Claude: Verify DM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1300, 300],
+      "credentials": { "httpHeaderAuth": { "id": "", "name": "Anthropic API Key" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Claude DM verification\nconst response = $input.first().json;\nconst dealData = $('Extract Deal Data').item.json;\nlet text = '';\nif (response.content && Array.isArray(response.content)) {\n  text = response.content.filter(b => b.type === 'text').map(b => b.text).join('\\n');\n}\n\nlet dm;\ntry {\n  const cleaned = text.replace(/```json|```/g, '').trim();\n  const match = cleaned.match(/\\{[\\s\\S]*\\}/);\n  dm = JSON.parse(match ? match[0] : cleaned);\n} catch (e) {\n  dm = { best_match: { name: 'Unknown', title: 'VP Operations', confidence: 'low', why_this_person: 'Parse error' } };\n}\n\nconst contact = dm.best_match || {};\n\nreturn [{ json: {\n  ...dealData,\n  dm_name: contact.name || 'Unknown',\n  dm_title: contact.title || 'Operations Leader',\n  dm_linkedin: contact.linkedin_url || '',\n  dm_email: contact.email || '',\n  dm_confidence: contact.confidence || 'low',\n  dm_reasoning: contact.why_this_person || '',\n  dm_backup_name: dm.backup?.name || '',\n  dm_backup_title: dm.backup?.title || ''\n} }];"
+      },
+      "id": "b2000001-0000-0000-0000-000000000060",
+      "name": "Parse DM Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/contacts",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Content-Type", "value": "application/json" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"properties\": {\n    \"firstname\": \"{{ $json.dm_name.split(' ')[0] || '' }}\",\n    \"lastname\": \"{{ $json.dm_name.split(' ').slice(1).join(' ') || '' }}\",\n    \"jobtitle\": \"{{ $json.dm_title }}\",\n    \"email\": \"{{ $json.dm_email }}\",\n    \"linkedin_url\": \"{{ $json.dm_linkedin }}\",\n    \"source_workflow\": \"hiring-signal-sniper\",\n    \"notes\": \"DM Confidence: {{ $json.dm_confidence }}. {{ $json.dm_reasoning }}. Backup: {{ $json.dm_backup_name }} ({{ $json.dm_backup_title }})\"\n  },\n  \"associations\": [\n    {\n      \"to\": { \"id\": {{ $json.companyId }} },\n      \"types\": [{ \"associationCategory\": \"HUBSPOT_DEFINED\", \"associationTypeId\": 280 }]\n    },\n    {\n      \"to\": { \"id\": {{ $json.dealId }} },\n      \"types\": [{ \"associationCategory\": \"HUBSPOT_DEFINED\", \"associationTypeId\": 4 }]\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "b2000001-0000-0000-0000-000000000070",
+      "name": "HubSpot: Create Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1820, 300],
+      "credentials": { "httpHeaderAuth": { "id": "", "name": "HubSpot Private App" } }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://api.hubapi.com/crm/v3/objects/deals/{{ $('Extract Deal Data').item.json.dealId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Content-Type", "value": "application/json" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"properties\": {\n    \"dealstage\": \"contactfoundpendingreview\",\n    \"dm_confidence\": \"{{ $('Parse DM Result').item.json.dm_confidence }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "b2000001-0000-0000-0000-000000000080",
+      "name": "HubSpot: Update Deal Stage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2080, 300],
+      "credentials": { "httpHeaderAuth": { "id": "", "name": "HubSpot Private App" } }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"*Decision Maker Found* :bust_in_silhouette:\\n\\n*Company:* {{ $('Parse DM Result').item.json.companyName }}\\n*Contact:* {{ $('Parse DM Result').item.json.dm_name }} — {{ $('Parse DM Result').item.json.dm_title }}\\n*Confidence:* {{ $('Parse DM Result').item.json.dm_confidence }}\\n*LinkedIn:* {{ $('Parse DM Result').item.json.dm_linkedin }}\\n*Reasoning:* {{ $('Parse DM Result').item.json.dm_reasoning }}\\n\\n→ Verify in HubSpot, then move to 'Contact Approved'\"\n}",
+        "options": {}
+      },
+      "id": "b2000001-0000-0000-0000-000000000090",
+      "name": "Slack: DM Found",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2080, 480]
+    }
+  ],
+  "connections": {
+    "Webhook: Deal Approved": { "main": [[{ "node": "HubSpot: Get Deal", "type": "main", "index": 0 }]] },
+    "HubSpot: Get Deal": { "main": [[{ "node": "Extract Deal Data", "type": "main", "index": 0 }]] },
+    "Extract Deal Data": { "main": [[{ "node": "Apollo: Find People", "type": "main", "index": 0 }]] },
+    "Apollo: Find People": { "main": [[{ "node": "Parse Apollo Results", "type": "main", "index": 0 }]] },
+    "Parse Apollo Results": { "main": [[{ "node": "Claude: Verify DM", "type": "main", "index": 0 }]] },
+    "Claude: Verify DM": { "main": [[{ "node": "Parse DM Result", "type": "main", "index": 0 }]] },
+    "Parse DM Result": { "main": [[{ "node": "HubSpot: Create Contact", "type": "main", "index": 0 }]] },
+    "HubSpot: Create Contact": { "main": [[{ "node": "HubSpot: Update Deal Stage", "type": "main", "index": 0 }, { "node": "Slack: DM Found", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}
