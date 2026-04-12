@@ -9,7 +9,7 @@ async function claude(messages, system, search = true) {
   if (search) body.tools = [{ type: "web_search_20250305", name: "web_search" }];
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": _apiKey, "anthropic-version": "2023-06-01" },
+    headers: { "Content-Type": "application/json", "x-api-key": _apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
     body: JSON.stringify(body),
   });
   if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error?.message || `API ${res.status}`); }
