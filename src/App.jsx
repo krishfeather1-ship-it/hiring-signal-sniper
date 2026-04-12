@@ -3,18 +3,26 @@ import { useState, useRef, useCallback, useEffect } from "react";
 let _apiKey = "";
 let _hubspotToken = "";
 
-async function claude(messages, system, search = true) {
+async function claude(messages, system, search = true, retries = 3) {
   if (!_apiKey) throw new Error("Connect your Anthropic API key to get started.");
-  const body = { model: "claude-sonnet-4-20250514", max_tokens: 4096, messages, system };
+  const body = { model: "claude-haiku-4-5-20251001", max_tokens: 4096, messages, system };
   if (search) body.tools = [{ type: "web_search_20250305", name: "web_search" }];
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": _apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error?.message || `API ${res.status}`); }
-  const data = await res.json();
-  return data.content.filter(b => b.type === "text").map(b => b.text).join("\n");
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": _apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 429) {
+      const wait = Math.pow(2, attempt) * 5000;
+      await new Promise(r => setTimeout(r, wait));
+      continue;
+    }
+    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error?.message || `API ${res.status}`); }
+    const data = await res.json();
+    return data.content.filter(b => b.type === "text").map(b => b.text).join("\n");
+  }
+  throw new Error("Rate limited — wait 30s and try again.");
 }
 function parseJSON(text) {
   try { const m = text.replace(/```json|```/g, "").trim().match(/\{[\s\S]*\}/); return JSON.parse(m[0]); } catch { return null; }
