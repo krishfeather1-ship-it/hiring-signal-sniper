@@ -160,12 +160,18 @@ function Pipeline({hs}) {
       await delay(200);
       log("⚡","AI Agent","Analyzing hiring patterns via web search...");
 
-      const s1 = await claude([{role:"user",content:`Search for mid-market companies (200-2000 employees) in US mortgage, lending, insurance, credit union industries currently hiring phone/call center roles. "${input}"\n\nMID-MARKET ONLY. NOT: GEICO, Progressive, Rocket Mortgage, Wells Fargo, JPMorgan. Regional lenders, mid-size servicers, specialty insurers, credit unions $1B-$10B.\n\nFind 5-7 real companies. Return ONLY JSON:\n{"signals":[{"company":"","role_title":"","location":"","num_openings":5,"industry":"","signal_strength":"high/medium/low"}]}`}],
-        "Hiring signal agent. MID-MARKET only. Return ONLY valid JSON.");
+      const today = new Date().toISOString().split("T")[0];
+      const s1 = await claude([{role:"user",content:`Today is ${today}. Search for mid-market companies (200-2000 employees) in US mortgage, lending, insurance, credit union industries ACTIVELY hiring phone/call center roles RIGHT NOW. "${input}"\n\nCRITICAL REQUIREMENTS:\n- ONLY include jobs posted within the last 14 days. Anything older is stale.\n- Include the actual posting date or "days ago" for each signal.\n- Include the job board URL where you found the listing.\n- MID-MARKET ONLY. NOT: GEICO, Progressive, Rocket Mortgage, Wells Fargo, JPMorgan, Bank of America, Citi, Capital One. Focus on regional lenders, mid-size servicers, specialty insurers, credit unions $1B-$10B.\n\nFind 5-7 real companies with FRESH postings. Return ONLY JSON:\n{"signals":[{"company":"","role_title":"","location":"","num_openings":5,"industry":"","signal_strength":"high/medium/low","posted_date":"2026-04-10","days_ago":2,"job_url":"https://...","source":"Indeed/LinkedIn/ZipRecruiter/Glassdoor"}]}`}],
+        "Hiring signal agent. MID-MARKET only. ONLY jobs posted in last 14 days. Return ONLY valid JSON.");
       const d1 = parseJSON(s1);
       if (!d1?.signals?.length) throw new Error("No signals found.");
-      setSignals(d1.signals);
-      d1.signals.forEach(s => log("📡","Signal",`${s.company} — ${s.num_openings}x ${s.role_title} (${s.location})`,"signal"));
+      const fresh = d1.signals.filter(s => !s.days_ago || s.days_ago <= 14);
+      if (!fresh.length) throw new Error("No fresh signals (all postings older than 14 days).");
+      setSignals(fresh);
+      fresh.forEach(s => {
+        const age = s.days_ago ? (s.days_ago <= 3 ? "🟢" : s.days_ago <= 7 ? "🟡" : "🟠") : "⚪";
+        log(age,"Signal",`${s.company} — ${s.num_openings}x ${s.role_title} (${s.location}) · ${s.days_ago ? s.days_ago+"d ago" : s.posted_date||"recent"} via ${s.source||"web"}`,s.days_ago<=3?"success":"signal");
+      });
 
       log("📊","ICP Engine","Running 5-dimension qualification...");
       await delay(300);
@@ -175,7 +181,7 @@ function Pipeline({hs}) {
       await delay(200);
       log("⚡","AI Agent","Scoring each company...");
 
-      const list = d1.signals.map((s,i) => `${i+1}. ${s.company} (${s.industry}, ${s.num_openings}x ${s.role_title}, ${s.location})`).join("\n");
+      const list = d1.signals.map((s,i) => `${i+1}. ${s.company} (${s.industry}, ${s.num_openings}x ${s.role_title}, ${s.location}, posted ${s.days_ago||"?"}d ago)`).join("\n");
       const s2 = await claude([{role:"user",content:`Qualify for Feather AI voice:\n\n${list}\n\nScore 0-2 on: industry, size, phone intensity, no AI voice, timing. /10. Qualified if 6+.\n\nReturn JSON:\n{"companies":[{"name":"","total_score":0,"qualified":true,"employees":"","revenue":"","has_ai_voice":false,"estimated_contract_value":"$100K","reasoning":""}]}`}],
         "B2B qualification agent. Return ONLY valid JSON.");
       const d2 = parseJSON(s2);
@@ -342,21 +348,33 @@ function Pipeline({hs}) {
               <div style={{ display:"grid",gap:8 }}>
                 {qualified.filter(c=>c.qualified).map((c,i) => {
                   const on = approved1.has(c.name);
+                  const sig = signals.find(s=>s.company===c.name);
+                  const days = sig?.days_ago;
+                  const freshColor = days<=3?"#059669":days<=7?"#d97706":"#dc2626";
+                  const freshLabel = days? (days<=1?"Today":days+"d ago") : sig?.posted_date||"Recent";
                   return (
                     <div key={i} onClick={()=>{const n=new Set(approved1);on?n.delete(c.name):n.add(c.name);setApproved1(n)}}
-                      style={{ background:"#fff",border:`2px solid ${on?"#2563eb":"#e5e7eb"}`,borderRadius:10,padding:"14px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",transition:"border .15s" }}>
-                      <div>
-                        <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:3 }}>
-                          <div style={{ width:20,height:20,borderRadius:6,border:`2px solid ${on?"#2563eb":"#d1d5db"}`,background:on?"#2563eb":"#fff",display:"flex",alignItems:"center",justifyContent:"center" }}>
-                            {on && <svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 6l2 2 4-4" stroke="#fff" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>}
+                      style={{ background:"#fff",border:`2px solid ${on?"#2563eb":"#e5e7eb"}`,borderRadius:10,padding:"14px 16px",cursor:"pointer",transition:"border .15s" }}>
+                      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
+                        <div>
+                          <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:3 }}>
+                            <div style={{ width:20,height:20,borderRadius:6,border:`2px solid ${on?"#2563eb":"#d1d5db"}`,background:on?"#2563eb":"#fff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+                              {on && <svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 6l2 2 4-4" stroke="#fff" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>}
+                            </div>
+                            <span style={{ fontSize:14,fontWeight:600,color:"#111827" }}>{c.name}</span>
+                            <Tag color="green">{c.total_score}/10</Tag>
+                            <Tag color="blue">{c.estimated_contract_value}</Tag>
                           </div>
-                          <span style={{ fontSize:14,fontWeight:600,color:"#111827" }}>{c.name}</span>
-                          <Tag color="green">{c.total_score}/10</Tag>
-                          <Tag color="blue">{c.estimated_contract_value}</Tag>
+                          <div style={{ fontSize:11,color:"#9ca3af",marginLeft:28 }}>{c.employees} employees · {c.reasoning}</div>
+                          {sig && <div style={{ display:"flex",alignItems:"center",gap:8,marginLeft:28,marginTop:4 }}>
+                            <span style={{ fontSize:10,fontWeight:600,color:freshColor }}>📅 {freshLabel}</span>
+                            <span style={{ fontSize:10,color:"#9ca3af" }}>{sig.num_openings}x {sig.role_title} · {sig.location}</span>
+                            {sig.source && <span style={{ fontSize:9,color:"#6b7280",background:"#f3f4f6",padding:"1px 6px",borderRadius:3 }}>{sig.source}</span>}
+                            {sig.job_url && <a href={sig.job_url} target="_blank" rel="noopener" onClick={e=>e.stopPropagation()} style={{ fontSize:10,color:"#2563eb",textDecoration:"none" }}>View posting ↗</a>}
+                          </div>}
                         </div>
-                        <div style={{ fontSize:11,color:"#9ca3af",marginLeft:28 }}>{c.employees} employees · {c.reasoning}</div>
+                        <span style={{ fontSize:11,fontWeight:600,color:on?"#2563eb":"#d1d5db",flexShrink:0 }}>{on?"Selected":"Click to approve"}</span>
                       </div>
-                      <span style={{ fontSize:11,fontWeight:600,color:on?"#2563eb":"#d1d5db" }}>{on?"Selected":"Click to approve"}</span>
                     </div>
                   );
                 })}
