@@ -3,7 +3,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 let _apiKey = "";
 let _hubspotToken = "";
 
-async function claude(messages, system, search = true, retries = 3) {
+async function claude(messages, system, search = true, retries = 4) {
   if (!_apiKey) throw new Error("Connect your Anthropic API key to get started.");
   const body = { model: "claude-haiku-4-5-20251001", max_tokens: 4096, messages, system };
   if (search) body.tools = [{ type: "web_search_20250305", name: "web_search" }];
@@ -14,7 +14,7 @@ async function claude(messages, system, search = true, retries = 3) {
       body: JSON.stringify(body),
     });
     if (res.status === 429) {
-      const wait = Math.pow(2, attempt) * 5000;
+      const wait = [15000, 30000, 45000, 60000][attempt] || 60000;
       await new Promise(r => setTimeout(r, wait));
       continue;
     }
@@ -22,7 +22,7 @@ async function claude(messages, system, search = true, retries = 3) {
     const data = await res.json();
     return data.content.filter(b => b.type === "text").map(b => b.text).join("\n");
   }
-  throw new Error("Rate limited — wait 30s and try again.");
+  throw new Error("Rate limited — wait 60s and try again.");
 }
 function parseJSON(text) {
   try { const m = text.replace(/```json|```/g, "").trim().match(/\{[\s\S]*\}/); return JSON.parse(m[0]); } catch { return null; }
@@ -210,17 +210,21 @@ function Pipeline({hs}) {
         await delay(200);
         log("📧","Hunter.io",`Resolving email pattern...`);
         await delay(200);
+        log("🔍","Background",`Researching DM's career history & interests...`);
+        await delay(200);
         log("⚡","AI Agent",`Selecting highest-confidence DM...`);
 
-        const s3 = await claude([{role:"user",content:`Find the decision maker at ${co.name} (${co.employees} employees, ${co.industry}) for AI voice software.\nTarget: VP Ops, COO, Dir Contact Center, VP CX, CTO. NOT recruiters/agents.\nReturn JSON: {"dm":{"name":"","title":"","linkedin_url":"","email_guess":"","confidence":"high/medium/low","why":""}}`}],
+        const s3 = await claude([{role:"user",content:`Find the decision maker at ${co.name} (${co.employees} employees, ${co.industry}) for purchasing AI voice calling software.\n\nTarget titles (priority order): VP Operations, COO, Director of Contact Center, VP Customer Experience, CTO, Director of Loan Servicing. NOT recruiters, agents, or CEO.\n\nAlso research their background: previous companies, education, LinkedIn activity, any published articles or talks.\n\nReturn JSON:\n{"dm":{"name":"","title":"","linkedin_url":"","email_guess":"","confidence":"high/medium/low","why":"","background":"2-3 sentences about their career, expertise, or recent activity that could personalize outreach"}}`}],
           "Contact research agent. Return ONLY valid JSON.");
         const d3 = parseJSON(s3);
-        const dm = d3?.dm || {name:"N/A",title:"Ops Leader",confidence:"low"};
+        const dm = d3?.dm || {name:"N/A",title:"Ops Leader",confidence:"low",background:""};
         log("✅","Apollo.io",`${dm.name} — ${dm.title} (${dm.confidence} confidence)`,"success");
+        if (dm.background) log("📋","Background",dm.background);
         if (dm.email_guess) log("📧","Hunter.io",`Verified: ${dm.email_guess}`);
         if (dm.linkedin_url) log("🔗","LinkedIn",`Profile: ${dm.linkedin_url}`);
         results.push({company:co, signal:sig, dm});
         setEnriched([...results]);
+        if (picked.indexOf(co) < picked.length - 1) { log("⏳","Cooldown","Waiting 10s to avoid rate limits..."); await delay(10000); }
         } catch(err) { log("⚠️","Error",`${co.name}: ${err.message} — skipping`,"error"); }
       }
       log("⏸","Gate 2","Awaiting human approval — verify contacts below","gate");
@@ -243,16 +247,19 @@ function Pipeline({hs}) {
         await delay(300);
         log("📊","BLS Data",`Pulling avg salary for ${item.signal.location}...`);
         await delay(200);
-        log("✍️","Copywriter",`Drafting outreach for ${item.dm.name}...`);
+        log("✍️","Copywriter",`Personalizing outreach for ${item.dm.name}...`);
         await delay(200);
+        log("🎯","Personalization",`Using DM background for tailored messaging...`);
 
-        const s4 = await claude([{role:"user",content:`ROI+OUTREACH for ${item.company.name} (${item.company.employees} emp, ${item.company.revenue} rev, ${item.company.industry}). Hiring ${item.signal.num_openings||8} phone agents. Feather=$0.07/min.\n\nROI: salary+30%+$4K training vs Feather (50 calls/day, 5min avg, 250 days).\n\nOUTREACH for ${item.dm.name} (${item.dm.title}):\n1. EMAIL <100w, ref hiring, lead ROI. Subject <50ch.\n2. LINKEDIN note <300ch + followup <150w.\n3. POST <200w, provocative, say "a ${item.company.industry} company".\n\nReturn JSON:\n{"roi":{"hiring_annual":0,"feather_annual":0,"savings":0,"pct":0},"email":{"subject":"","body":""},"linkedin":{"note":"","followup":""},"post":""}`}],
-          "Financial analyst + copywriter. Return ONLY valid JSON.", true);
+        const bgContext = item.dm.background ? `\n\nDM BACKGROUND (use to personalize): ${item.dm.background}` : "";
+        const s4 = await claude([{role:"user",content:`ROI+OUTREACH for ${item.company.name} (${item.company.employees} emp, ${item.company.revenue || "unknown"} rev, ${item.company.industry}). Currently hiring ${item.signal.num_openings||8} phone agents at ${item.signal.location}. Feather AI voice platform=$0.07/min.${bgContext}\n\nDM: ${item.dm.name}, ${item.dm.title}\n\n1. ROI CALC: Current cost = (${item.signal.num_openings||8} agents × avg salary $45K × 1.3 benefits + $4K training each). Feather cost = (50 calls/agent/day × 5min avg × 250 days × $0.07/min). Show clear numbers.\n\n2. COLD EMAIL (ready to send, <100 words): Reference their specific job posting for ${item.signal.role_title}. Lead with the ROI number. Mention Feather by name. End with a specific ask (15-min call this week). Subject line <50 chars. Sign as "Krish" from Feather.\n\n3. LINKEDIN CONNECTION NOTE (<300 chars): Short, personal, reference something from their background if available. No pitch - just connect.\n\n4. LINKEDIN FOLLOW-UP MESSAGE (<150 words): After they accept. Reference the hiring signal. Share the ROI number. Ask for 15 mins.\n\n5. LINKEDIN THOUGHT LEADERSHIP POST (<200 words): Provocative take on AI replacing call centers in ${item.company.industry}. Don't name the company directly — say "a ${item.company.industry} company". End with a question to drive engagement.\n\nReturn JSON:\n{"roi":{"hiring_annual":0,"feather_annual":0,"savings":0,"pct":0},"email":{"subject":"","body":""},"linkedin":{"note":"","followup":""},"post":""}`}],
+          "B2B sales copywriter at an AI voice startup. Write punchy, specific, human outreach. Return ONLY valid JSON.", true);
         const d4 = parseJSON(s4);
         if (d4?.roi) log("💰","ROI",`$${Math.round((d4.roi.savings||0)/1000)}K/yr savings (${d4.roi.pct}%)`,"success");
-        log("✅","Pipeline",`${item.company.name} — outreach ready`,"success");
+        log("✅","Pipeline",`${item.company.name} — outreach package ready`,"success");
         results.push({...item, roi:d4?.roi||{}, outreach:{email:d4?.email,linkedin:d4?.linkedin,post:d4?.post}});
         setFinal([...results]);
+        if (picked.indexOf(item) < picked.length - 1) { log("⏳","Cooldown","Waiting 12s to avoid rate limits..."); await delay(12000); }
         } catch(err) { log("⚠️","Error",`${item.company.name}: ${err.message} — skipping`,"error"); }
       }
       log("🎯","Complete",`${results.length} companies ready for outreach`,"success");
@@ -441,17 +448,48 @@ function Pipeline({hs}) {
                         <Metric l="Savings" v={`$${Math.round((item.roi?.savings||0)/1000)}K`} s={`${item.roi?.pct||0}%`} c="#10b981"/>
                       </div>}
                       {tab==="email" && item.outreach?.email && <div>
-                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><span style={{fontSize:13,fontWeight:600,color:"#111827"}}>Subject: {item.outreach.email.subject}</span><CopyBtn text={item.outreach.email.subject+"\n\n"+item.outreach.email.body}/></div>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                          <span style={{fontSize:13,fontWeight:600,color:"#111827"}}>Subject: {item.outreach.email.subject}</span>
+                          <div style={{display:"flex",gap:6}}>
+                            <CopyBtn text={`Subject: ${item.outreach.email.subject}\n\n${item.outreach.email.body}`}/>
+                            {item.dm.email_guess && <a href={`mailto:${item.dm.email_guess}?subject=${encodeURIComponent(item.outreach.email.subject)}&body=${encodeURIComponent(item.outreach.email.body)}`}
+                              style={{background:"#2563eb",color:"#fff",padding:"3px 12px",borderRadius:5,fontSize:11,fontWeight:600,textDecoration:"none",display:"inline-block"}}>Open in Mail ↗</a>}
+                          </div>
+                        </div>
+                        {item.dm.email_guess && <div style={{fontSize:11,color:"#6b7280",marginBottom:8}}>To: <span style={{color:"#111827",fontWeight:500}}>{item.dm.email_guess}</span></div>}
                         <pre style={{background:"#f9fafb",padding:14,borderRadius:8,border:"1px solid #f3f4f6"}}>{item.outreach.email.body}</pre>
                       </div>}
                       {tab==="linkedin" && item.outreach?.linkedin && <div>
-                        <div style={{marginBottom:14}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><span style={{fontSize:11,color:"#6b7280",fontWeight:600,textTransform:"uppercase"}}>Connection note</span><CopyBtn text={item.outreach.linkedin.note}/></div>
-                        <pre style={{background:"#f9fafb",padding:12,borderRadius:8,border:"1px solid #f3f4f6",borderLeft:"3px solid #2563eb"}}>{item.outreach.linkedin.note}</pre></div>
-                        <div><div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><span style={{fontSize:11,color:"#6b7280",fontWeight:600,textTransform:"uppercase"}}>Follow-up</span><CopyBtn text={item.outreach.linkedin.followup}/></div>
-                        <pre style={{background:"#f9fafb",padding:12,borderRadius:8,border:"1px solid #f3f4f6",borderLeft:"3px solid #7c3aed"}}>{item.outreach.linkedin.followup}</pre></div>
+                        {item.dm.linkedin_url && <div style={{marginBottom:14,display:"flex",gap:8}}>
+                          <a href={item.dm.linkedin_url} target="_blank" rel="noopener" style={{background:"#0077b5",color:"#fff",padding:"6px 16px",borderRadius:6,fontSize:12,fontWeight:600,textDecoration:"none",display:"inline-flex",alignItems:"center",gap:6}}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14m-.5 15.5v-5.3a3.26 3.26 0 0 0-3.26-3.26c-.85 0-1.84.52-2.32 1.3v-1.11h-2.79v8.37h2.79v-4.93c0-.77.62-1.4 1.39-1.4a1.4 1.4 0 0 1 1.4 1.4v4.93h2.79M6.88 8.56a1.68 1.68 0 0 0 1.68-1.68c0-.93-.75-1.69-1.68-1.69a1.69 1.69 0 0 0-1.69 1.69c0 .93.76 1.68 1.69 1.68m1.39 9.94v-8.37H5.5v8.37h2.77z"/></svg>
+                            Open {item.dm.name}'s profile
+                          </a>
+                        </div>}
+                        <div style={{marginBottom:14}}>
+                          <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                            <span style={{fontSize:11,color:"#6b7280",fontWeight:600,textTransform:"uppercase"}}>Connection note · paste when connecting</span>
+                            <CopyBtn text={item.outreach.linkedin.note}/>
+                          </div>
+                          <pre style={{background:"#f9fafb",padding:12,borderRadius:8,border:"1px solid #f3f4f6",borderLeft:"3px solid #0077b5"}}>{item.outreach.linkedin.note}</pre>
+                        </div>
+                        <div>
+                          <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                            <span style={{fontSize:11,color:"#6b7280",fontWeight:600,textTransform:"uppercase"}}>Follow-up · send after they accept</span>
+                            <CopyBtn text={item.outreach.linkedin.followup}/>
+                          </div>
+                          <pre style={{background:"#f9fafb",padding:12,borderRadius:8,border:"1px solid #f3f4f6",borderLeft:"3px solid #7c3aed"}}>{item.outreach.linkedin.followup}</pre>
+                        </div>
                       </div>}
                       {tab==="post" && item.outreach?.post && <div>
-                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><span style={{fontSize:11,color:"#6b7280",fontWeight:600,textTransform:"uppercase"}}>LinkedIn post</span><CopyBtn text={item.outreach.post}/></div>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                          <span style={{fontSize:11,color:"#6b7280",fontWeight:600,textTransform:"uppercase"}}>LinkedIn thought leadership post</span>
+                          <div style={{display:"flex",gap:6}}>
+                            <CopyBtn text={item.outreach.post}/>
+                            <a href="https://www.linkedin.com/feed/" target="_blank" rel="noopener"
+                              style={{background:"#0077b5",color:"#fff",padding:"3px 12px",borderRadius:5,fontSize:11,fontWeight:600,textDecoration:"none"}}>Open LinkedIn ↗</a>
+                          </div>
+                        </div>
                         <pre style={{background:"#f9fafb",padding:14,borderRadius:8,border:"1px solid #f3f4f6",lineHeight:1.7}}>{item.outreach.post}</pre>
                       </div>}
                     </div>
