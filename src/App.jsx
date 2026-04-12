@@ -240,6 +240,8 @@ function Pipeline({hs}) {
     setPhase("outreach");
     const picked = enriched.filter(e => approved2.has(e.company.name));
     try {
+      log("⏳","Cooldown","Waiting 15s before outreach generation to reset rate limits...");
+      await delay(15000);
       const results = [];
       for (const item of picked) {
         try {
@@ -253,7 +255,7 @@ function Pipeline({hs}) {
 
         const bgContext = item.dm.background ? `\n\nDM BACKGROUND (use to personalize): ${item.dm.background}` : "";
         const s4 = await claude([{role:"user",content:`ROI+OUTREACH for ${item.company.name} (${item.company.employees} emp, ${item.company.revenue || "unknown"} rev, ${item.company.industry}). Currently hiring ${item.signal.num_openings||8} phone agents at ${item.signal.location}. Feather AI voice platform=$0.07/min.${bgContext}\n\nDM: ${item.dm.name}, ${item.dm.title}\n\n1. ROI CALC: Current cost = (${item.signal.num_openings||8} agents × avg salary $45K × 1.3 benefits + $4K training each). Feather cost = (50 calls/agent/day × 5min avg × 250 days × $0.07/min). Show clear numbers.\n\n2. COLD EMAIL (ready to send, <100 words): Reference their specific job posting for ${item.signal.role_title}. Lead with the ROI number. Mention Feather by name. End with a specific ask (15-min call this week). Subject line <50 chars. Sign as "Krish" from Feather.\n\n3. LINKEDIN CONNECTION NOTE (<300 chars): Short, personal, reference something from their background if available. No pitch - just connect.\n\n4. LINKEDIN FOLLOW-UP MESSAGE (<150 words): After they accept. Reference the hiring signal. Share the ROI number. Ask for 15 mins.\n\n5. LINKEDIN THOUGHT LEADERSHIP POST (<200 words): Provocative take on AI replacing call centers in ${item.company.industry}. Don't name the company directly — say "a ${item.company.industry} company". End with a question to drive engagement.\n\nReturn JSON:\n{"roi":{"hiring_annual":0,"feather_annual":0,"savings":0,"pct":0},"email":{"subject":"","body":""},"linkedin":{"note":"","followup":""},"post":""}`}],
-          "B2B sales copywriter at an AI voice startup. Write punchy, specific, human outreach. Return ONLY valid JSON.", true);
+          "B2B sales copywriter at an AI voice startup. Write punchy, specific, human outreach. Return ONLY valid JSON.", false);
         const d4 = parseJSON(s4);
         if (d4?.roi) log("💰","ROI",`$${Math.round((d4.roi.savings||0)/1000)}K/yr savings (${d4.roi.pct}%)`,"success");
         log("✅","Pipeline",`${item.company.name} — outreach package ready`,"success");
@@ -501,13 +503,65 @@ function Pipeline({hs}) {
 
           {phase==="done" && final.length>0 && (
             <div className="fu" style={{ marginTop:16 }}>
-              <div style={{ padding:"16px 20px",background:"#f0fdf4",border:"1px solid #86efac",borderRadius:10,marginBottom:10 }}>
+              {/* Stats */}
+              <div style={{ padding:"16px 20px",background:"#f0fdf4",border:"1px solid #86efac",borderRadius:10,marginBottom:16 }}>
+                <div style={{ fontSize:14,fontWeight:700,color:"#059669",marginBottom:10 }}>✓ Pipeline complete</div>
                 <div style={{ display:"flex",gap:28,flexWrap:"wrap" }}>
-                  <St l="Signals" v={signals.length}/><St l="Qualified" v={qualified.filter(c=>c.qualified).length}/><St l="Approved" v={final.length}/><St l="Savings" v={`$${Math.round(final.reduce((s,e)=>s+(e.roi?.savings||0),0)/1000)}K/yr`}/>
+                  <St l="Signals scanned" v={signals.length}/><St l="ICP qualified" v={qualified.filter(c=>c.qualified).length}/><St l="Outreach ready" v={final.length}/><St l="Total addressable savings" v={`$${Math.round(final.reduce((s,e)=>s+(e.roi?.savings||0),0)/1000)}K/yr`}/>
                 </div>
               </div>
+
+              {/* Per-company action cards */}
+              <div style={{ fontSize:12,fontWeight:600,color:"#111827",marginBottom:10 }}>Quick actions per company</div>
+              {final.map((item,i) => (
+                <div key={i} style={{ background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:"16px 18px",marginBottom:10 }}>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12 }}>
+                    <div>
+                      <div style={{ fontSize:15,fontWeight:700,color:"#111827" }}>{item.company.name}</div>
+                      <div style={{ fontSize:12,color:"#6b7280" }}>{item.company.employees} emp · {item.company.industry} · {item.signal.location}</div>
+                    </div>
+                    {item.roi?.savings>0 && <div style={{ textAlign:"right" }}>
+                      <div style={{ fontSize:20,fontWeight:700,color:"#10b981" }}>${Math.round(item.roi.savings/1000)}K</div>
+                      <div style={{ fontSize:10,color:"#6b7280" }}>savings/yr ({item.roi.pct}%)</div>
+                    </div>}
+                  </div>
+
+                  <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:12,padding:"8px 12px",background:"#f9fafb",borderRadius:8 }}>
+                    <div style={{ width:32,height:32,borderRadius:"50%",background:"#f0f4ff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14 }}>👤</div>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:13,fontWeight:600,color:"#111827" }}>{item.dm.name}</div>
+                      <div style={{ fontSize:11,color:"#6b7280" }}>{item.dm.title}</div>
+                    </div>
+                    {item.dm.linkedin_url && <a href={item.dm.linkedin_url} target="_blank" rel="noopener" style={{ fontSize:10,color:"#0077b5",textDecoration:"none",fontWeight:600 }}>LinkedIn ↗</a>}
+                    {item.dm.email_guess && <span style={{ fontSize:10,color:"#6b7280" }}>{item.dm.email_guess}</span>}
+                  </div>
+
+                  <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                    {item.dm.email_guess && item.outreach?.email && (
+                      <a href={`mailto:${item.dm.email_guess}?subject=${encodeURIComponent(item.outreach.email.subject||"")}&body=${encodeURIComponent(item.outreach.email.body||"")}`}
+                        style={{ padding:"7px 16px",borderRadius:6,fontSize:12,fontWeight:600,background:"#2563eb",color:"#fff",textDecoration:"none",display:"inline-flex",alignItems:"center",gap:5 }}>
+                        ✉ Send email
+                      </a>
+                    )}
+                    {item.dm.linkedin_url && (
+                      <a href={item.dm.linkedin_url} target="_blank" rel="noopener"
+                        style={{ padding:"7px 16px",borderRadius:6,fontSize:12,fontWeight:600,background:"#0077b5",color:"#fff",textDecoration:"none",display:"inline-flex",alignItems:"center",gap:5 }}>
+                        💬 Connect on LinkedIn
+                      </a>
+                    )}
+                    {item.outreach?.linkedin?.note && <CopyBtn text={item.outreach.linkedin.note} label="Copy connection note"/>}
+                    {item.outreach?.email && <CopyBtn text={`Subject: ${item.outreach.email.subject}\n\n${item.outreach.email.body}`} label="Copy email"/>}
+                    {item.outreach?.post && <CopyBtn text={item.outreach.post} label="Copy post"/>}
+                    {hs && <button onClick={()=>pushHS(item)} disabled={hsStatus[item.company.name]==="done"} style={{
+                      padding:"7px 16px",borderRadius:6,fontSize:12,fontWeight:600,border:`1px solid ${hsStatus[item.company.name]==="done"?"#86efac":"#fed7aa"}`,
+                      background:hsStatus[item.company.name]==="done"?"#f0fdf4":"#fff7ed",color:hsStatus[item.company.name]==="done"?"#059669":"#ea580c"
+                    }}>{hsStatus[item.company.name]==="done"?"✓ In HubSpot":"→ Push to HubSpot"}</button>}
+                  </div>
+                </div>
+              ))}
+
               <button onClick={()=>{setPhase("idle");setSignals([]);setQualified([]);setEnriched([]);setFinal([]);setLogs([]);setError(null)}}
-                style={{ background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,padding:"8px 20px",fontSize:13,fontWeight:600,color:"#6b7280",width:"100%" }}>
+                style={{ background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:600,color:"#6b7280",width:"100%",marginTop:8 }}>
                 ↻ Run new pipeline
               </button>
             </div>
@@ -656,8 +710,8 @@ function Metric({l,v,s,c}) {
   </div>;
 }
 function St({l,v}) { return <div><div style={{fontSize:10,color:"#059669",fontWeight:500,marginBottom:2}}>{l}</div><div style={{fontSize:17,fontWeight:700,color:"#111827"}}>{v}</div></div>; }
-function CopyBtn({text}) {
+function CopyBtn({text,label}) {
   const [c,setC]=useState(false);
-  return <button onClick={()=>{navigator.clipboard.writeText(text);setC(true);setTimeout(()=>setC(false),1500)}}
-    style={{background:"#f9fafb",border:"1px solid #e5e7eb",color:c?"#10b981":"#6b7280",padding:"3px 10px",borderRadius:5,fontSize:11,fontWeight:500}}>{c?"✓":"Copy"}</button>;
+  return <button onClick={(e)=>{e.stopPropagation();navigator.clipboard.writeText(text);setC(true);setTimeout(()=>setC(false),1500)}}
+    style={{background:"#f9fafb",border:"1px solid #e5e7eb",color:c?"#10b981":"#6b7280",padding:"3px 10px",borderRadius:5,fontSize:11,fontWeight:500}}>{c?"✓":label||"Copy"}</button>;
 }
