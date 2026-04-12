@@ -173,22 +173,25 @@ function Pipeline({hs}) {
         log(age,"Signal",`${s.company} — ${s.num_openings}x ${s.role_title} (${s.location}) · ${s.days_ago ? s.days_ago+"d ago" : s.posted_date||"recent"} via ${s.source||"web"}`,s.days_ago<=3?"success":"signal");
       });
 
-      log("📊","ICP Engine","Running 5-dimension qualification...");
+      log("📊","ICP Engine","Running weighted 6-factor qualification model...");
       await delay(300);
       log("🔎","Crunchbase","Pulling company size & revenue...");
       await delay(200);
       log("🔎","G2 / Gartner","Checking AI voice vendor relationships...");
       await delay(200);
-      log("⚡","AI Agent","Scoring each company...");
+      log("📊","ICP Model","Running weighted 6-factor scoring model...");
 
       const list = d1.signals.map((s,i) => `${i+1}. ${s.company} (${s.industry}, ${s.num_openings}x ${s.role_title}, ${s.location}, posted ${s.days_ago||"?"}d ago)`).join("\n");
-      const s2 = await claude([{role:"user",content:`Qualify for Feather AI voice:\n\n${list}\n\nScore 0-2 on: industry, size, phone intensity, no AI voice, timing. /10. Qualified if 6+.\n\nReturn JSON:\n{"companies":[{"name":"","total_score":0,"qualified":true,"employees":"","revenue":"","has_ai_voice":false,"estimated_contract_value":"$100K","reasoning":""}]}`}],
-        "B2B qualification agent. Return ONLY valid JSON.");
+      const s2 = await claude([{role:"user",content:`You are an ICP qualification engine for Feather, an AI voice calling platform for lending and insurance.\n\nCompanies to evaluate:\n${list}\n\nScore each company using this WEIGHTED 6-FACTOR MODEL. Each factor scores 0-2:\n\n1. INDUSTRY ALIGNMENT (weight 20%)\n   2 = Core target (mortgage servicing, loan origination, insurance claims, credit union member services)\n   1 = Adjacent (general banking ops, fintech, debt collection, property management)\n   0 = Non-target industry\n\n2. COMPANY SIZE (weight 15%)\n   2 = Sweet spot: 200-2,000 employees\n   1 = Workable: 100-200 or 2,000-5,000 employees\n   0 = Too small (<100) or too large (>5,000) — disqualify if >5,000\n\n3. PHONE OPERATION INTENSITY (weight 25%)\n   2 = High volume: 5+ phone/call center roles open simultaneously\n   1 = Moderate: 2-4 roles open\n   0 = Low: 1 role or unclear phone operations\n\n4. AI VOICE READINESS (weight 20%)\n   2 = No AI voice vendor detected (no Vapi, Retell, Bland, Synthflow, or similar)\n   1 = Legacy IVR only, no conversational AI\n   0 = Already has AI voice solution — HARD DISQUALIFY\n\n5. BUDGET SIGNAL (weight 10%)\n   2 = Revenue $100M-$5B or recently funded, likely has budget for $50K-$200K/yr platform\n   1 = Revenue $50M-$100M or stable mid-market\n   0 = Very small revenue or unable to determine\n\n6. TIMING URGENCY (weight 10%)\n   2 = Posted within 7 days AND 5+ openings (urgent scaling need)\n   1 = Posted within 14 days OR 3+ openings\n   0 = Older posting or single opening\n\nWEIGHTED SCORE = (industry×20 + size×15 + phone×25 + ai_ready×20 + budget×10 + timing×10) / 20\nThis gives a score out of 10. QUALIFIED if weighted_score ≥ 6.0.\n\nHARD DISQUALIFIERS (auto-reject regardless of score):\n- Already uses AI voice solution (ai_readiness = 0)\n- Government entity\n- >5,000 employees\n- <50 employees\n\nResearch each company. Return ONLY JSON:\n{"companies":[{"name":"","weighted_score":0.0,"qualified":true,"employees":"","revenue":"","has_ai_voice":false,"estimated_contract_value":"$100K","reasoning":"1 sentence","scores":{"industry":0,"size":0,"phone_intensity":0,"ai_readiness":0,"budget":0,"timing":0},"disqualify_reason":""}]}`}],
+        "ICP qualification engine. Use the exact weighted formula. Return ONLY valid JSON.");
       const d2 = parseJSON(s2);
-      const companies = d2?.companies || [];
+      const companies = (d2?.companies || []).map(c => ({...c, total_score: c.weighted_score || c.total_score || 0}));
       setQualified(companies);
-      companies.filter(c=>c.qualified).forEach(c => log("✅","ICP",`${c.name} — ${c.total_score}/10 (${c.employees} emp)`,"success"));
-      companies.filter(c=>!c.qualified).forEach(c => log("❌","ICP",`${c.name} — filtered (${c.reasoning||"below threshold"})`,"filtered"));
+      companies.filter(c=>c.qualified).forEach(c => {
+        const s = c.scores||{};
+        log("✅","ICP",`${c.name} — ${c.total_score}/10 | Ind:${s.industry||0} Size:${s.size||0} Phone:${s.phone_intensity||0} AI:${s.ai_readiness||0} Budget:${s.budget||0} Time:${s.timing||0}`,"success");
+      });
+      companies.filter(c=>!c.qualified).forEach(c => log("❌","ICP",`${c.name} — ${c.total_score}/10 (${c.disqualify_reason||c.reasoning||"below threshold"})`,"filtered"));
 
       if (!companies.some(c=>c.qualified)) throw new Error("No companies qualified.");
       log("⏸","Gate 1","Awaiting human approval — review qualified companies below","gate");
@@ -355,17 +358,17 @@ function Pipeline({hs}) {
                   return (
                     <div key={i} onClick={()=>{const n=new Set(approved1);on?n.delete(c.name):n.add(c.name);setApproved1(n)}}
                       style={{ background:"#fff",border:`2px solid ${on?"#2563eb":"#e5e7eb"}`,borderRadius:10,padding:"14px 16px",cursor:"pointer",transition:"border .15s" }}>
-                      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
+                      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8 }}>
                         <div>
                           <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:3 }}>
                             <div style={{ width:20,height:20,borderRadius:6,border:`2px solid ${on?"#2563eb":"#d1d5db"}`,background:on?"#2563eb":"#fff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
                               {on && <svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 6l2 2 4-4" stroke="#fff" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>}
                             </div>
                             <span style={{ fontSize:14,fontWeight:600,color:"#111827" }}>{c.name}</span>
-                            <Tag color="green">{c.total_score}/10</Tag>
+                            <span style={{ fontSize:14,fontWeight:700,color:c.total_score>=8?"#059669":c.total_score>=6?"#2563eb":"#d97706" }}>{c.total_score}/10</span>
                             <Tag color="blue">{c.estimated_contract_value}</Tag>
                           </div>
-                          <div style={{ fontSize:11,color:"#9ca3af",marginLeft:28 }}>{c.employees} employees · {c.reasoning}</div>
+                          <div style={{ fontSize:11,color:"#9ca3af",marginLeft:28 }}>{c.employees} employees · {c.revenue||"unknown rev"} · {c.reasoning}</div>
                           {sig && <div style={{ display:"flex",alignItems:"center",gap:8,marginLeft:28,marginTop:4 }}>
                             <span style={{ fontSize:10,fontWeight:600,color:freshColor }}>📅 {freshLabel}</span>
                             <span style={{ fontSize:10,color:"#9ca3af" }}>{sig.num_openings}x {sig.role_title} · {sig.location}</span>
@@ -375,6 +378,28 @@ function Pipeline({hs}) {
                         </div>
                         <span style={{ fontSize:11,fontWeight:600,color:on?"#2563eb":"#d1d5db",flexShrink:0 }}>{on?"Selected":"Click to approve"}</span>
                       </div>
+                      {/* ICP Scorecard */}
+                      {c.scores && <div style={{ marginLeft:28,background:"#f9fafb",borderRadius:8,padding:"10px 12px" }} onClick={e=>e.stopPropagation()}>
+                        <div style={{ fontSize:9,fontWeight:600,color:"#6b7280",textTransform:"uppercase",letterSpacing:".05em",marginBottom:6 }}>ICP scorecard</div>
+                        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:"4px 16px" }}>
+                          {[
+                            ["Industry","industry",20],["Size fit","size",15],["Phone intensity","phone_intensity",25],
+                            ["AI readiness","ai_readiness",20],["Budget signal","budget",10],["Timing","timing",10]
+                          ].map(([label,key,weight]) => {
+                            const val = c.scores[key]||0;
+                            const pct = (val/2)*100;
+                            return (
+                              <div key={key} style={{ display:"flex",alignItems:"center",gap:6 }}>
+                                <div style={{ width:80,fontSize:9,color:"#6b7280",flexShrink:0 }}>{label} <span style={{color:"#d1d5db"}}>({weight}%)</span></div>
+                                <div style={{ flex:1,height:6,background:"#e5e7eb",borderRadius:3,overflow:"hidden" }}>
+                                  <div style={{ width:`${pct}%`,height:"100%",borderRadius:3,background:val===2?"#10b981":val===1?"#f59e0b":"#ef4444",transition:"width .3s" }}/>
+                                </div>
+                                <span style={{ fontSize:9,fontWeight:600,color:val===2?"#059669":val===1?"#d97706":"#dc2626",width:14,textAlign:"right" }}>{val}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>}
                     </div>
                   );
                 })}
@@ -629,7 +654,7 @@ function Arch() {
   const steps = [
     { label:"Data Sources", color:"#2563eb", icon:"🔍", items:["Indeed","LinkedIn Jobs","ZipRecruiter","Glassdoor","Google Jobs"], desc:"Parallel scan across 5 job boards" },
     { label:"AI Scan Agent", color:"#2563eb", icon:"🤖", items:["Claude + Web Search","Parse hiring signals","Extract company data"], desc:"Identifies companies hiring phone agents" },
-    { label:"ICP Qualification", color:"#7c3aed", icon:"📊", items:["Crunchbase (size/rev)","G2/Gartner (AI vendors)","5-dim scoring","Threshold: ≥ 6/10"], desc:"Score: industry, size, phone intensity, no AI voice, timing" },
+    { label:"ICP Qualification", color:"#7c3aed", icon:"📊", items:["Crunchbase (size/rev)","G2/Gartner (AI vendors)","Weighted 6-factor model","Threshold: ≥ 6.0/10"], desc:"Industry (20%), Size (15%), Phone intensity (25%), AI readiness (20%), Budget (10%), Timing (10%)" },
   ];
   const gate1 = { label:"Gate 1: Approve companies", desc:"Review each qualified company. Select which to enrich. Reject the rest." };
   const steps2 = [
