@@ -67,14 +67,13 @@ function parseJSON(raw) {
 /* ═══ CLAUDE API HELPER ═══
    Model strategy: Sonnet for quality (web search, DM finding),
    Haiku for speed (JSON parsing, outreach generation).
-   useModel param: 'sonnet' (default for search), 'haiku' (for structured output) */
+   useModel param: override model selection */
 async function callClaude(systemPrompt, userMessage, useWebSearch = false, maxSearchUses = 3, useModel = null) {
   const addLog = _addLog;
-  // Pick model: Sonnet for web search + complex reasoning, Haiku for fast structured output
-  const model = useModel || (useWebSearch ? 'claude-sonnet-4-20250514' : 'claude-haiku-4-5-20251001');
-  const isSonnet = model.includes('sonnet');
-  // Sonnet + web search can take 90s+; Haiku is fast
-  const timeoutMs = (useWebSearch && isSonnet) ? 120000 : 60000;
+  // ALL calls use Haiku — Sonnet rate limits are too aggressive for web search
+  const model = useModel || 'claude-haiku-4-5-20251001';
+  // Haiku + web search typically finishes in 30-45s
+  const timeoutMs = useWebSearch ? 90000 : 60000;
   // Tight max_tokens to avoid waste
   const maxTok = useWebSearch ? 1500 : 2048;
 
@@ -112,7 +111,9 @@ async function callClaude(systemPrompt, userMessage, useWebSearch = false, maxSe
       clearTimeout(timeout);
 
       if (res.status === 429 || res.status === 529) {
-        const waitSec = backoff(attempt);
+        // Respect server's retry-after header if present, otherwise use our backoff
+        const retryAfter = res.headers.get('retry-after');
+        const waitSec = retryAfter ? Math.min(parseInt(retryAfter, 10) || backoff(attempt), 120) : backoff(attempt);
         if (addLog) addLog("RATE", "Rate Limit", `Attempt ${attempt + 1}/${maxRetries} — backing off ${waitSec}s...`, "orange");
         await countdownWait(waitSec, addLog, `Rate limit cooldown —`);
         lastError = new Error('Rate limited');
@@ -434,9 +435,9 @@ function Pipeline({ hs }) {
     try {
       // ── STEP 1: Web search → prose (Sonnet + 1 combined site-targeted search) ──
       const today = new Date().toLocaleDateString();
-      log("MODEL", "Sonnet", "Using Sonnet for web search — quality matters here");
-      log("WAIT", "Warmup", "Brief 10s warmup to ensure clean rate window...");
-      await countdownWait(10, log, "Warmup —");
+      log("MODEL", "Haiku", "Using Haiku for web search — fast + high rate limits");
+      log("WAIT", "Warmup", "Brief 5s warmup to ensure clean rate window...");
+      await countdownWait(5, log, "Warmup —");
       log("SCAN", "Indeed", `Searching site:indeed.com for: ${input.slice(0, 50)}...`);
       await sleep(200);
       log("SCAN", "LinkedIn Jobs", `Searching site:linkedin.com/jobs for postings...`);
@@ -453,9 +454,9 @@ function Pipeline({ hs }) {
 
       log("OK", "Scan", `Search complete — parsing results...`, "success");
 
-      // ── 20-second pause between Step 1 and Step 2 ──
-      log("WAIT", "Cooldown", "Waiting 20s to avoid rate limits...");
-      await countdownWait(20, log, "Rate limit cooldown —");
+      // ── 10-second pause between Step 1 and Step 2 ──
+      log("WAIT", "Cooldown", "Waiting 10s before parsing...");
+      await countdownWait(10, log, "Cooldown —");
 
       // ── STEP 2: Parse prose → JSON (Haiku — fast structured output) ──
       log("MODEL", "Haiku", "Switching to Haiku for fast JSON parsing");
@@ -578,9 +579,9 @@ function Pipeline({ hs }) {
     setPhase("enriching"); timerRef.current = setInterval(() => setElapsed(p => p + 1), 1000);
     const picked = qualified.filter(c => c.qualified && approved1.has(c.name));
     try {
-      log("MODEL", "Sonnet", "Using Sonnet for contact research — accuracy matters");
-      log("WAIT", "Cooldown", "Waiting 30s to reset rate limits before enrichment...");
-      await countdownWait(30, log, "Pre-enrichment cooldown —");
+      log("MODEL", "Haiku", "Using Haiku for contact research — fast + reliable");
+      log("WAIT", "Cooldown", "Waiting 15s before enrichment...");
+      await countdownWait(15, log, "Pre-enrichment cooldown —");
       const results = [];
       let _enrichIdx = 0;
       for (const co of picked) {
@@ -606,7 +607,7 @@ function Pipeline({ hs }) {
           results.push({ company: co, signal: sig, dm });
           setEnriched([...results]);
           _enrichIdx++;
-          if (_enrichIdx < picked.length) { log("WAIT", "Cooldown", "Waiting 20s between companies to avoid rate limits..."); await countdownWait(20, log, "Between-company cooldown —"); }
+          if (_enrichIdx < picked.length) { log("WAIT", "Cooldown", "Waiting 10s between companies..."); await countdownWait(10, log, "Between-company cooldown —"); }
         } catch(err) { log("ERR", "Error", `${co.name}: ${err.message} — skipping`, "error"); _enrichIdx++; }
       }
       if (results.length === 0) throw new Error("No contacts found.");
