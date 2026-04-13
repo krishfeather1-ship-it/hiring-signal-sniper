@@ -65,15 +65,12 @@ function parseJSON(raw) {
 }
 
 /* ═══ CLAUDE API HELPER ═══
-   Model strategy: Sonnet for quality (web search, DM finding),
-   Haiku for speed (JSON parsing, outreach generation).
-   useModel param: override model selection */
+   Haiku for all calls. Web search via web_search_20250305 tool.
+   Retry with backoff on 429s. */
 async function callClaude(systemPrompt, userMessage, useWebSearch = false, maxSearchUses = 3, useModel = null) {
   const addLog = _addLog;
-  // Haiku for everything — Sonnet rate limits too aggressive for web_search at this API tier
   const model = useModel || 'claude-haiku-4-5-20251001';
   const timeoutMs = useWebSearch ? 90000 : 60000;
-  // Web search needs room: tool call + response. Non-search: structured JSON.
   const maxTok = useWebSearch ? 2048 : 1500;
 
   const body = {
@@ -89,7 +86,7 @@ async function callClaude(systemPrompt, userMessage, useWebSearch = false, maxSe
   const cleanKey = _apiKey.replace(/[^\x20-\x7E]/g, '').trim();
   let lastError = null;
   const maxRetries = 5;
-  // Backoff: 30s, 45s, 60s, 75s, 90s — patient enough for 1-min rate windows
+  // Backoff: 30s, 45s, 60s, 75s, 90s
   const backoff = (n) => 30 + n * 15;
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -110,7 +107,6 @@ async function callClaude(systemPrompt, userMessage, useWebSearch = false, maxSe
       clearTimeout(timeout);
 
       if (res.status === 429 || res.status === 529) {
-        // Respect server's retry-after header if present, otherwise use our backoff
         const retryAfter = res.headers.get('retry-after');
         const waitSec = retryAfter ? Math.min(parseInt(retryAfter, 10) || backoff(attempt), 120) : backoff(attempt);
         if (addLog) addLog("RATE", "Rate Limit", `Attempt ${attempt + 1}/${maxRetries} — backing off ${waitSec}s...`, "orange");
@@ -124,7 +120,6 @@ async function callClaude(systemPrompt, userMessage, useWebSearch = false, maxSe
       }
 
       const data = await res.json();
-      // Log token usage for budget monitoring
       if (data.usage && addLog) {
         const inp = data.usage.input_tokens || 0;
         const out = data.usage.output_tokens || 0;
@@ -437,7 +432,7 @@ function Pipeline({ hs }) {
       // ── STEP 1: Web search → prose (Sonnet + 1 combined site-targeted search) ──
       const today = new Date().toLocaleDateString();
       log("MODEL", "Haiku", "Using Haiku for web search — zero rate limit risk");
-      log("WAIT", "Warmup", "Brief 5s warmup to ensure clean rate window...");
+      log("WAIT", "Warmup", "5s warmup to ensure clean rate window...");
       await countdownWait(5, log, "Warmup —");
       log("SCAN", "Indeed", `Searching site:indeed.com for: ${input.slice(0, 50)}...`);
       await sleep(200);
@@ -538,7 +533,7 @@ function Pipeline({ hs }) {
         // Formula: (p*25 + i*20 + a*20 + s*15 + b*10 + t*10) / 20
         const weighted = (phoneScore * 25 + industryScore * 20 + aiScore * 20 + sizeScore * 15 + budgetScore * 10 + timingScore * 10) / 20;
         const score = Math.round(weighted * 10) / 10;
-        const empLabel = emp > 0 ? `${emp.toLocaleString()} emp` : "200-2000";
+        const empLabel = emp > 0 ? `${emp.toLocaleString()}` : "200-2000";
 
         return {
           name: s.company,
@@ -1189,29 +1184,21 @@ function Pipeline({ hs }) {
                     </div>}
                   </div>
 
-                  {/* All contacts for this company */}
-                  <div style={{ display: "grid", gap: 6, marginBottom: 12 }}>
-                    {(item.dms && item.dms.length > 0 ? item.dms : [item.dm]).map((d, di) => (
-                      <div key={di} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: di === 0 ? "#f5f3ff" : "#f9fafb", borderRadius: 8, border: di === 0 ? "1px solid #ede9fe" : "1px solid #f3f4f6" }}>
-                        <div style={{ width: 28, height: 28, borderRadius: "50%", background: di === 0 ? "#ede9fe" : "#f0f4ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0 }}>&#128100;</div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{d.name}{di === 0 ? " ★" : ""}</div>
-                          <div style={{ fontSize: 10, color: "#6b7280" }}>{d.title}</div>
-                        </div>
-                        {d.linkedin_url && d.linkedin_url.startsWith("http") && <a href={d.linkedin_url} target="_blank" rel="noopener" style={{ fontSize: 10, color: "#0077b5", textDecoration: "none", fontWeight: 600, flexShrink: 0 }}>LinkedIn &#8599;</a>}
-                        {d.email_guess && d.email_guess.includes("@") && <span style={{ fontSize: 10, color: "#6b7280", flexShrink: 0 }}>{d.email_guess}</span>}
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Per-DM outreach actions */}
+                  {/* Contacts + actions — unified per person */}
                   <div style={{ display: "grid", gap: 8, marginBottom: 8 }}>
                     {(item.dms && item.dms.length > 0 ? item.dms : [item.dm]).map((d, di) => {
                       const dmOut = item.perDmOutreach?.find(p => p.name === d.name) || (di === 0 ? { email: item.outreach?.email, linkedin: item.outreach?.linkedin } : {});
                       return (
-                        <div key={di} style={{ background: "#f9fafb", borderRadius: 8, padding: "10px 12px", border: "1px solid #f3f4f6" }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", marginBottom: 6 }}>{d.name} — {d.title}</div>
-                          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                        <div key={di} style={{ background: di === 0 ? "#f5f3ff" : "#f9fafb", borderRadius: 8, padding: "10px 12px", border: di === 0 ? "1px solid #ede9fe" : "1px solid #f3f4f6" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                            <div style={{ width: 28, height: 28, borderRadius: "50%", background: di === 0 ? "#ede9fe" : "#f0f4ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0 }}>&#128100;</div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{d.name}{di === 0 ? " ★" : ""}</div>
+                              <div style={{ fontSize: 10, color: "#6b7280" }}>{d.title}</div>
+                            </div>
+                            {d.email_guess && d.email_guess.includes("@") && <span style={{ fontSize: 10, color: "#6b7280", fontFamily: "'JetBrains Mono',monospace", flexShrink: 0 }}>{d.email_guess}</span>}
+                          </div>
+                          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginLeft: 36 }}>
                             {d.email_guess && dmOut.email && (
                               <a href={`mailto:${encodeURIComponent(d.email_guess)}?subject=${encodeURIComponent(dmOut.email.subject || "")}&body=${encodeURIComponent(dmOut.email.body || "")}`}
                                 style={{ padding: "5px 12px", borderRadius: 5, fontSize: 10, fontWeight: 600, background: "#2563eb", color: "#fff", textDecoration: "none" }}>
