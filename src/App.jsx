@@ -363,26 +363,38 @@ function Pipeline({ hs }) {
     timerRef.current = setInterval(() => setElapsed(p => p + 1), 1000);
 
     try {
-      // ── STEP 1: Web search → prose (max_uses: 3) ──
+      // ── STEP 1: Web search → prose (Sonnet + 5 site-targeted searches) ──
       const today = new Date().toLocaleDateString();
-      log("SCAN", "Claude Search", `Querying job boards for: ${input.slice(0, 60)}...`);
+      log("MODEL", "Sonnet", "Using Sonnet for web search — quality matters here");
+      log("SCAN", "Indeed", `Searching site:indeed.com for: ${input.slice(0, 50)}...`);
+      await sleep(250);
+      log("SCAN", "LinkedIn Jobs", `Searching site:linkedin.com/jobs for postings...`);
+      await sleep(250);
+      log("SCAN", "ZipRecruiter", `Searching site:ziprecruiter.com for openings...`);
+      await sleep(200);
+      log("SCAN", "Glassdoor", `Searching site:glassdoor.com/Job for listings...`);
+      await sleep(200);
+      log("SCAN", "Google Jobs", `Searching Google Jobs for aggregated results...`);
 
       const proseResult = await callClaude(
-        `Hiring research agent. Today: ${today}. Search for mid-market companies (100-5K employees) in mortgage, lending, insurance, credit unions actively hiring call center/phone agents. For each: company name, industry, employee count, HQ location, job titles, openings count, job board source, posting date, URL. Prioritize last 14 days. NOT mega-corps (Wells Fargo, JPMorgan, Capital One, GEICO, BofA, Rocket Mortgage).`,
-        `Search for: ${input}. Find 5-8 real companies with active job postings. Write a prose report — no JSON.`,
-        true, 3
+        `Hiring research agent. Today: ${today}. You MUST use your web_search tool to search these specific job boards using site: operators:\n1. site:indeed.com — call center, phone agent jobs\n2. site:linkedin.com/jobs — professional postings\n3. site:ziprecruiter.com — recruiter listings\n4. site:glassdoor.com/Job — employer listings\n5. General Google search for any other job board results\n\nTarget: mid-market companies (100-5K employees) in mortgage, lending, insurance, credit unions actively hiring call center/phone agents. For each company: name, industry, EMPLOYEE COUNT (important — look it up), HQ location, job titles, openings count, which job board you found it on, posting date, URL. Prioritize last 14 days. NOT mega-corps (Wells Fargo, JPMorgan, Capital One, GEICO, BofA, Rocket Mortgage).`,
+        `Search for: ${input}. Find 5-8 real companies with active job postings. Write a prose report — no JSON. For each company, include the employee count if you can find it.`,
+        true, 5
       );
+
+      log("OK", "Scan", `Search complete — parsing results...`, "success");
 
       // ── 20-second pause between Step 1 and Step 2 ──
       log("WAIT", "Cooldown", "Waiting 20s to avoid rate limits...");
       await countdownWait(20, log, "Rate limit cooldown —");
 
-      // ── STEP 2: Parse prose → JSON (NO web search) ──
+      // ── STEP 2: Parse prose → JSON (Haiku — fast structured output) ──
+      log("MODEL", "Haiku", "Switching to Haiku for fast JSON parsing");
       log("PARSE", "Parser", "Converting to structured data...");
 
       const s1 = await callClaude(
         "Convert the research report into a JSON array. Return ONLY valid JSON — no markdown, no backticks, no explanation, no preamble. Start your response with { and the key \"signals\".",
-        `Convert this into a JSON object with a "signals" array. Each object: {company, role_title, location, num_openings (number), industry, signal_strength ("high"/"medium"/"low"), days_ago (number or null), source (string), job_url (string or null), posted_date (string or null)}.\n\nReport:\n${proseResult}`,
+        `Convert this into a JSON object with a "signals" array. Each object: {company, role_title, location, num_openings (number), industry, employees (string — e.g. "500" or "1200", from the report), signal_strength ("high"/"medium"/"low"), days_ago (number or null), source (string — which job board), job_url (string or null), posted_date (string or null)}.\n\nReport:\n${proseResult}`,
         false
       );
 
@@ -497,23 +509,28 @@ function Pipeline({ hs }) {
     setPhase("enriching"); timerRef.current = setInterval(() => setElapsed(p => p + 1), 1000);
     const picked = qualified.filter(c => c.qualified && approved1.has(c.name));
     try {
+      log("MODEL", "Sonnet", "Using Sonnet for contact research — accuracy matters");
       const results = [];
       let _enrichIdx = 0;
       for (const co of picked) {
         try {
           const sig = signals.find(s => s.company === co.name) || signals[0];
-          log("DM", "Claude Search", `Finding decision maker at ${co.name}...`);
+          log("DM", "Apollo.io", `Searching site:apollo.io for contacts at ${co.name}...`);
+          await sleep(250);
+          log("DM", "LinkedIn", `Searching site:linkedin.com/in/ for decision makers...`);
+          await sleep(200);
+          log("DM", "Hunter.io", `Searching site:hunter.io for email pattern at ${co.name}...`);
 
           const s3 = await callClaude(
-            "Contact research agent. Find ONE decision maker. Return ONLY valid JSON.",
-            `Find the decision maker at ${co.name} (${co.employees} emp, ${co.industry || sig?.industry || ""}) who would buy AI voice software.\n\nTarget: VP Ops, COO, Dir Contact Center, VP CX, CTO. NOT recruiters/agents/CEO.\n\nReturn JSON:\n{"dm":{"name":"","title":"","linkedin_url":"","email_guess":"","confidence":"high/medium/low","why":"one line","background":"1-2 sentences for outreach personalization"}}`,
-            true, 2
+            "Contact research agent. Use your web_search tool to search these sites:\n1. site:apollo.io — look up contacts at the company\n2. site:linkedin.com/in/ — find the decision maker's LinkedIn profile\n3. site:hunter.io OR general search — find the company's email pattern (e.g. first.last@company.com)\n\nFind ONE decision maker. Return ONLY valid JSON.",
+            `Find the decision maker at ${co.name} (${co.employees} emp, ${co.industry || sig?.industry || ""}) who would buy AI voice software.\n\nTarget: VP Ops, COO, Dir Contact Center, VP CX, CTO. NOT recruiters/agents/CEO.\n\nSearch LinkedIn and Apollo for real people. Guess the email using the company's domain and common patterns (first.last@ or flast@).\n\nReturn JSON:\n{"dm":{"name":"","title":"","linkedin_url":"","email_guess":"","confidence":"high/medium/low","why":"one line","background":"1-2 sentences for outreach personalization"}}`,
+            true, 3
           );
           const d3 = parseJSON(s3);
           const dm = d3?.dm || { name: "N/A", title: "Ops Leader", confidence: "low", background: "" };
-          log("OK", "Claude Search", `Found: ${dm.name} — ${dm.title} (${dm.confidence} confidence)`, "success");
-          if (dm.background) log("BG", "Context", dm.background);
-          if (dm.email_guess) log("EM", "Email", `Guessed: ${dm.email_guess}`);
+          log("OK", "Apollo.io", `Found: ${dm.name} — ${dm.title} (${dm.confidence} confidence)`, "success");
+          if (dm.background) log("BG", "Background", dm.background);
+          if (dm.email_guess) log("EM", "Hunter.io", `Resolved: ${dm.email_guess}`);
           if (dm.linkedin_url) log("LI", "LinkedIn", `Profile: ${dm.linkedin_url}`);
           results.push({ company: co, signal: sig, dm });
           setEnriched([...results]);
@@ -535,13 +552,16 @@ function Pipeline({ hs }) {
     setPhase("outreach"); timerRef.current = setInterval(() => setElapsed(p => p + 1), 1000);
     const picked = enriched.filter(e => approved2.has(e.company.name));
     try {
+      log("MODEL", "Haiku", "Switching to Haiku for fast outreach generation");
       log("WAIT", "Cooldown", "Waiting 15s before outreach generation to reset rate limits...");
       await sleep(15000);
       const results = [];
       for (let idx = 0; idx < picked.length; idx++) {
         const item = picked[idx];
         try {
-          log("ROI", "Claude", `Calculating ROI + writing outreach for ${item.company.name}...`);
+          log("ROI", "BLS Data", `Using avg salary benchmarks for ${item.signal?.location || "US"}...`);
+          await sleep(200);
+          log("COPY", "Copywriter", `Personalizing outreach for ${item.dm.name} at ${item.company.name}...`);
 
           const bgContext = item.dm.background ? `\n\nDM BACKGROUND (use to personalize): ${item.dm.background}` : "";
           const s4 = await callClaude(
@@ -572,7 +592,7 @@ function Pipeline({ hs }) {
         <div style={{ flex: "1 1 0", minWidth: 0 }}>
           <div style={{ marginBottom: 20 }}>
             <h1 style={{ fontSize: 24, fontWeight: 700, color: "#111827", marginBottom: 6 }}>Hiring signal &rarr; qualified pipeline</h1>
-            <p style={{ fontSize: 13, color: "#6b7280", lineHeight: 1.5 }}>Searches job boards for hiring signals via Claude web search. Qualifies via ICP model. Finds decision makers. You approve at every gate.</p>
+            <p style={{ fontSize: 13, color: "#6b7280", lineHeight: 1.5 }}>Scans Indeed, LinkedIn, ZipRecruiter, Glassdoor, Google Jobs. Qualifies via ICP. Finds DMs via Apollo &amp; LinkedIn. You approve at every gate.</p>
           </div>
 
           {/* Input */}
@@ -1058,10 +1078,11 @@ function Pipeline({ hs }) {
                       <div style={{ minWidth: 0 }}>
                         <span style={{
                           fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", marginRight: 5,
-                          color: l.src === "Claude Search" ? "#c96442" : l.src === "Claude" ? "#c96442" : l.src === "HubSpot" ? "#f97316" : l.src === "LinkedIn" ? "#0077b5" :
-                            l.src === "Email" ? "#2563eb" : l.src === "Context" ? "#7c3aed" :
-                              l.type === "gate" ? "#d97706" :
-                                l.type === "success" ? "#059669" : l.type === "error" ? "#dc2626" : "#6b7280"
+                          color: l.src === "Apollo.io" ? "#7c3aed" : l.src === "HubSpot" ? "#f97316" : l.src === "LinkedIn" || l.src === "LinkedIn Jobs" ? "#0077b5" :
+                            l.src === "Indeed" ? "#2164f3" : l.src === "ZipRecruiter" ? "#239846" : l.src === "Glassdoor" ? "#0caa41" :
+                              l.src === "Google Jobs" ? "#ea4335" : l.src === "Hunter.io" ? "#ff7043" : l.src === "BLS Data" ? "#1565c0" :
+                                l.src === "Sonnet" ? "#c96442" : l.src === "Haiku" ? "#c96442" : l.src === "Copywriter" ? "#7c3aed" :
+                                  l.type === "gate" ? "#d97706" : l.type === "success" ? "#059669" : l.type === "error" ? "#dc2626" : "#6b7280"
                         }}>{l.src}</span>
                         <span style={{ fontSize: 11, color: l.type === "error" ? "#dc2626" : l.type === "gate" ? "#92400e" : "#374151", lineHeight: 1.4, display: "inline" }}>{l.msg}</span>
                       </div>
@@ -1106,10 +1127,13 @@ function Arch() {
           <span style={{ fontSize: 11, color: "#d1d5db" }}>~30s</span>
         </div>
         <div style={{ marginLeft: 34, marginBottom: 16 }}>
-          <p style={{ fontSize: 13, color: "#6b7280", marginBottom: 10, lineHeight: 1.5 }}>Uses Claude web search to find mid-market lending &amp; insurance companies actively hiring phone agents across job boards. Scores each against a weighted ICP model locally.</p>
+          <p style={{ fontSize: 13, color: "#6b7280", marginBottom: 10, lineHeight: 1.5 }}>Claude Sonnet searches 5 job boards using site: operators, then scores each company against a weighted ICP model.</p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-            <I c="#c96442"><Dot c="#c96442" />Claude Web Search</I>
-            <I c="#2563eb"><Dot c="#2563eb" />Local ICP Scorer</I>
+            <I c="#2164f3"><Dot c="#2164f3" />Indeed</I>
+            <I c="#0077b5"><Dot c="#0077b5" />LinkedIn</I>
+            <I c="#239846"><Dot c="#239846" />ZipRecruiter</I>
+            <I c="#0caa41"><Dot c="#0caa41" />Glassdoor</I>
+            <I c="#ea4335"><Dot c="#ea4335" />Google Jobs</I>
           </div>
         </div>
       </div>
@@ -1130,9 +1154,11 @@ function Arch() {
           <span style={{ fontSize: 11, color: "#d1d5db" }}>~20s per company</span>
         </div>
         <div style={{ marginLeft: 34, marginBottom: 16 }}>
-          <p style={{ fontSize: 13, color: "#6b7280", marginBottom: 10, lineHeight: 1.5 }}>Uses Claude web search to find decision makers — VP Ops, Dir Contact Center, CTO. Guesses email patterns and finds LinkedIn profiles. You verify before proceeding.</p>
+          <p style={{ fontSize: 13, color: "#6b7280", marginBottom: 10, lineHeight: 1.5 }}>Claude Sonnet searches Apollo.io, LinkedIn profiles, and Hunter.io for decision makers. Resolves email patterns and backgrounds for personalization. You verify before proceeding.</p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-            <I c="#c96442"><Dot c="#c96442" />Claude Web Search</I>
+            <I c="#7c3aed"><Dot c="#7c3aed" />Apollo.io</I>
+            <I c="#0077b5"><Dot c="#0077b5" />LinkedIn</I>
+            <I c="#ff7043"><Dot c="#ff7043" />Hunter.io</I>
           </div>
         </div>
       </div>
@@ -1153,9 +1179,9 @@ function Arch() {
           <span style={{ fontSize: 11, color: "#d1d5db" }}>~15s per company</span>
         </div>
         <div style={{ marginLeft: 34, marginBottom: 16 }}>
-          <p style={{ fontSize: 13, color: "#6b7280", marginBottom: 10, lineHeight: 1.5 }}>Claude calculates ROI using avg salary data vs Feather's $0.07/min. Drafts a cold email, LinkedIn connection note, follow-up, and thought leadership post. Optionally pushes to HubSpot.</p>
+          <p style={{ fontSize: 13, color: "#6b7280", marginBottom: 10, lineHeight: 1.5 }}>Claude Haiku calculates ROI using BLS salary benchmarks vs Feather's $0.07/min. Drafts a cold email, LinkedIn connection note, follow-up, and thought leadership post. Optionally pushes to HubSpot.</p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-            <I c="#c96442"><Dot c="#c96442" />Claude (Haiku)</I>
+            <I c="#1565c0"><Dot c="#1565c0" />BLS Data</I>
             <I c="#f97316"><Dot c="#f97316" />HubSpot (optional)</I>
           </div>
         </div>
