@@ -377,9 +377,9 @@ function Pipeline({ hs }) {
       log("SCAN", "Google Jobs", `Searching Google Jobs for aggregated results...`);
 
       const proseResult = await callClaude(
-        `Hiring research agent. Today: ${today}. You MUST use your web_search tool to search these specific job boards using site: operators:\n1. site:indeed.com — call center, phone agent jobs\n2. site:linkedin.com/jobs — professional postings\n3. site:ziprecruiter.com — recruiter listings\n4. site:glassdoor.com/Job — employer listings\n5. General Google search for any other job board results\n\nTarget: mid-market companies (100-5K employees) in mortgage, lending, insurance, credit unions actively hiring call center/phone agents. For each company: name, industry, EMPLOYEE COUNT (important — look it up), HQ location, job titles, openings count, which job board you found it on, posting date, URL. Prioritize last 14 days. NOT mega-corps (Wells Fargo, JPMorgan, Capital One, GEICO, BofA, Rocket Mortgage).`,
+        `Hiring research agent. Today: ${today}. Use your web_search tool efficiently — combine site: operators in a single search when possible (e.g. "site:indeed.com OR site:linkedin.com/jobs call center agent"). You have 3 searches max, so be strategic:\n- Search 1: site:indeed.com OR site:ziprecruiter.com for call center / phone agent jobs\n- Search 2: site:linkedin.com/jobs OR site:glassdoor.com/Job for professional postings\n- Search 3: General search for any remaining results + employee counts\n\nTarget: mid-market companies (100-5K employees) in mortgage, lending, insurance, credit unions actively hiring call center/phone agents. For each company: name, industry, EMPLOYEE COUNT (important — look it up), HQ location, job titles, openings count, which job board you found it on, posting date, URL. Prioritize last 14 days. NOT mega-corps (Wells Fargo, JPMorgan, Capital One, GEICO, BofA, Rocket Mortgage).`,
         `Search for: ${input}. Find 5-8 real companies with active job postings. Write a prose report — no JSON. For each company, include the employee count if you can find it.`,
-        true, 5
+        true, 3
       );
 
       log("OK", "Scan", `Search complete — parsing results...`, "success");
@@ -522,9 +522,9 @@ function Pipeline({ hs }) {
           log("DM", "Hunter.io", `Searching site:hunter.io for email pattern at ${co.name}...`);
 
           const s3 = await callClaude(
-            "Contact research agent. Use your web_search tool to search these sites:\n1. site:apollo.io — look up contacts at the company\n2. site:linkedin.com/in/ — find the decision maker's LinkedIn profile\n3. site:hunter.io OR general search — find the company's email pattern (e.g. first.last@company.com)\n\nFind ONE decision maker. Return ONLY valid JSON.",
+            "Contact research agent. You have 2 web searches — be efficient:\n- Search 1: site:linkedin.com/in/ OR site:apollo.io — find the decision maker's name, title, and profile URL\n- Search 2: General search for their email pattern (site:hunter.io or \"email\" + company domain)\n\nFind ONE decision maker. Return ONLY valid JSON.",
             `Find the decision maker at ${co.name} (${co.employees} emp, ${co.industry || sig?.industry || ""}) who would buy AI voice software.\n\nTarget: VP Ops, COO, Dir Contact Center, VP CX, CTO. NOT recruiters/agents/CEO.\n\nSearch LinkedIn and Apollo for real people. Guess the email using the company's domain and common patterns (first.last@ or flast@).\n\nReturn JSON:\n{"dm":{"name":"","title":"","linkedin_url":"","email_guess":"","confidence":"high/medium/low","why":"one line","background":"1-2 sentences for outreach personalization"}}`,
-            true, 3
+            true, 2
           );
           const d3 = parseJSON(s3);
           const dm = d3?.dm || { name: "N/A", title: "Ops Leader", confidence: "low", background: "" };
