@@ -432,23 +432,23 @@ function Pipeline({ hs }) {
     timerRef.current = setInterval(() => setElapsed(p => p + 1), 1000);
 
     try {
-      // ── STEP 1: Web search → prose (Sonnet + 5 site-targeted searches) ──
+      // ── STEP 1: Web search → prose (Sonnet + 1 combined site-targeted search) ──
       const today = new Date().toLocaleDateString();
       log("MODEL", "Sonnet", "Using Sonnet for web search — quality matters here");
+      log("WAIT", "Warmup", "Brief 10s warmup to ensure clean rate window...");
+      await countdownWait(10, log, "Warmup —");
       log("SCAN", "Indeed", `Searching site:indeed.com for: ${input.slice(0, 50)}...`);
-      await sleep(250);
+      await sleep(200);
       log("SCAN", "LinkedIn Jobs", `Searching site:linkedin.com/jobs for postings...`);
-      await sleep(250);
+      await sleep(200);
       log("SCAN", "ZipRecruiter", `Searching site:ziprecruiter.com for openings...`);
-      await sleep(200);
+      await sleep(150);
       log("SCAN", "Glassdoor", `Searching site:glassdoor.com/Job for listings...`);
-      await sleep(200);
-      log("SCAN", "Google Jobs", `Searching Google Jobs for aggregated results...`);
 
       const proseResult = await callClaude(
-        `Hiring research agent. Today: ${today}. You have exactly 2 web searches — be strategic:\n- Search 1: "${input}" site:indeed.com OR site:linkedin.com/jobs OR site:ziprecruiter.com — find active job postings\n- Search 2: "${input}" site:glassdoor.com OR site:google.com/search — cross-reference + get employee counts\n\nTarget: mid-market companies (100-5K employees). For each: company name, industry, employee count, HQ, job titles, openings count, source, date, URL. Last 14 days. NOT mega-corps.`,
+        `Hiring research agent. Today: ${today}. You have exactly 1 web search — make it count.\nSearch: "${input}" hiring OR "job posting" site:indeed.com OR site:linkedin.com/jobs OR site:ziprecruiter.com OR site:glassdoor.com\n\nTarget: mid-market companies (100-5K employees). For each: company name, industry, employee count, HQ, job titles, openings count, source, date, URL. Last 14 days. NOT mega-corps.`,
         `Search for: ${input}. Find 5-8 real companies with active job postings. Prose report — no JSON. Include employee count per company.`,
-        true, 2
+        true, 1
       );
 
       log("OK", "Scan", `Search complete — parsing results...`, "success");
@@ -593,9 +593,9 @@ function Pipeline({ hs }) {
           log("DM", "Hunter.io", `Resolving email pattern @${(co.name || "").toLowerCase().replace(/[^a-z]/g, "")}.com...`);
 
           const s3 = await callClaude(
-            `Contact research agent. You have 2 web searches — use them well:\n- Search 1: "${co.name}" VP OR Director OR "contact center" OR operations site:linkedin.com/in/ — find real decision makers with LinkedIn profile URLs\n- Search 2: "${co.name}" email format OR "${co.name}" apollo.io — find the company's email domain and naming pattern\n\nReturn ONLY valid JSON. The linkedin_url MUST be a real linkedin.com/in/ URL if you find one.`,
+            `Contact research agent. You have exactly 1 web search — combine everything:\nSearch: "${co.name}" VP OR Director OR "contact center" OR operations site:linkedin.com/in/ OR site:apollo.io\n\nReturn ONLY valid JSON. The linkedin_url MUST be a real linkedin.com/in/ URL if you find one.`,
             `Find the decision maker at ${co.name} (${co.employees} emp, ${co.industry || sig?.industry || ""}) who would buy AI voice software for their call center.\n\nTarget titles: VP Operations, VP Customer Experience, Director Contact Center, COO, CTO. NOT recruiters, HR, or agents.\n\nFor email_guess: find the company's domain and use first.last@ or flast@ pattern.\nFor linkedin_url: must be a real linkedin.com/in/username URL.\nFor background: find 1-2 specific facts (alma mater, previous employer, years in role) for outreach personalization.\n\nReturn JSON:\n{"dm":{"name":"Full Name","title":"Exact Title","linkedin_url":"https://linkedin.com/in/...","email_guess":"name@company.com","confidence":"high/medium/low","why":"one line","background":"specific facts for personalization"}}`,
-            true, 2
+            true, 1
           );
           const d3 = parseJSON(s3);
           const dm = d3?.dm || { name: "N/A", title: "Ops Leader", confidence: "low", background: "" };
