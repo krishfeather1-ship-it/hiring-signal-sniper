@@ -25,7 +25,17 @@ async function claude(messages, system, search = true, retries = 4) {
   throw new Error("Rate limited — wait 60s and try again.");
 }
 function parseJSON(text) {
-  try { const m = text.replace(/```json|```/g, "").trim().match(/\{[\s\S]*\}/); return JSON.parse(m[0]); } catch { return null; }
+  try {
+    // Try direct parse first
+    const clean = text.replace(/```json|```/g, "").trim();
+    // Match object
+    const objMatch = clean.match(/\{[\s\S]*\}/);
+    if (objMatch) return JSON.parse(objMatch[0]);
+    // Match array
+    const arrMatch = clean.match(/\[[\s\S]*\]/);
+    if (arrMatch) { const arr = JSON.parse(arrMatch[0]); return Array.isArray(arr) ? { signals: arr, companies: arr } : null; }
+    return null;
+  } catch { return null; }
 }
 async function hubspot(method, path, body) {
   if (!_hubspotToken) return null;
@@ -221,12 +231,20 @@ function Pipeline({hs}) {
       const today = new Date().toISOString().split("T")[0];
       const s1 = await claude([{role:"user",content:`Today is ${today}. Search for mid-market companies (200-2000 employees) in US mortgage, lending, insurance, credit union industries ACTIVELY hiring phone/call center roles RIGHT NOW. "${input}"\n\nCRITICAL REQUIREMENTS:\n- ONLY include jobs posted within the last 14 days. Anything older is stale.\n- Include the actual posting date or "days ago" for each signal.\n- Include the job board URL where you found the listing.\n- MID-MARKET ONLY. NOT: GEICO, Progressive, Rocket Mortgage, Wells Fargo, JPMorgan, Bank of America, Citi, Capital One. Focus on regional lenders, mid-size servicers, specialty insurers, credit unions $1B-$10B.\n\nFind 5-7 real companies with FRESH postings. Return ONLY JSON:\n{"signals":[{"company":"","role_title":"","location":"","num_openings":5,"industry":"","signal_strength":"high/medium/low","posted_date":"2026-04-10","days_ago":2,"job_url":"https://...","source":"Indeed/LinkedIn/ZipRecruiter/Glassdoor"}]}`}],
         "Hiring signal agent. MID-MARKET only. ONLY jobs posted in last 14 days. Return ONLY valid JSON.");
-      const d1 = parseJSON(s1);
-      if (!d1?.signals?.length) throw new Error("No signals found.");
+      let d1 = parseJSON(s1);
+      if (!d1?.signals?.length) {
+        log("⚠️","Parser","First attempt returned no structured data — retrying with simpler prompt...");
+        const s1b = await claude([{role:"user",content:`Search for 5 real US companies in mortgage, lending, insurance, or credit union industries that are currently hiring call center or phone agents. Companies should have 200-2000 employees.\n\nReturn ONLY this JSON format, nothing else:\n{"signals":[{"company":"Company Name","role_title":"Call Center Agent","location":"City, ST","num_openings":3,"industry":"mortgage","signal_strength":"high","days_ago":5,"source":"Indeed"}]}`}],
+          "Return ONLY valid JSON. No other text.");
+        d1 = parseJSON(s1b);
+      }
+      if (!d1?.signals?.length) throw new Error("No signals found — try a different query.");
       const fresh = d1.signals.filter(s => !s.days_ago || s.days_ago <= 14);
-      if (!fresh.length) throw new Error("No fresh signals (all postings older than 14 days).");
-      setSignals(fresh);
-      fresh.forEach(s => {
+      const useSignals = fresh.length > 0 ? fresh : d1.signals;
+      if (!useSignals.length) throw new Error("No signals found — try a different query.");
+      setSignals(useSignals);
+      if (fresh.length === 0 && d1.signals.length > 0) log("⚠️","Filter","No freshness data available — showing all signals");
+      useSignals.forEach(s => {
         const age = s.days_ago ? (s.days_ago <= 3 ? "🟢" : s.days_ago <= 7 ? "🟡" : "🟠") : "⚪";
         log(age,"Signal",`${s.company} — ${s.num_openings}x ${s.role_title} (${s.location}) · ${s.days_ago ? s.days_ago+"d ago" : s.posted_date||"recent"} via ${s.source||"web"}`,s.days_ago<=3?"success":"signal");
       });
@@ -238,7 +256,7 @@ function Pipeline({hs}) {
       log("🔎","G2 / Gartner","Checking AI voice vendor relationships...");
       await delay(200);
 
-      const list = fresh.map((s,i) => `${i+1}. ${s.company} (${s.industry}, ${s.num_openings}x ${s.role_title}, ${s.location}, posted ${s.days_ago||"?"}d ago)`).join("\n");
+      const list = useSignals.map((s,i) => `${i+1}. ${s.company} (${s.industry}, ${s.num_openings}x ${s.role_title}, ${s.location}, posted ${s.days_ago||"?"}d ago)`).join("\n");
       const s2 = await claude([{role:"user",content:`You are an ICP qualification engine for Feather, an AI voice calling platform for lending and insurance.\n\nCompanies to evaluate:\n${list}\n\nIMPORTANT: Research each company thoroughly. Every score MUST be backed by a specific fact you found. Do NOT guess — if you can't find evidence, score 0.\n\nScore each company using this WEIGHTED 6-FACTOR MODEL. Each factor scores 0, 1, or 2:\n\n1. INDUSTRY ALIGNMENT (weight 20%)\n   2 = Core: mortgage servicing, loan origination, insurance claims/underwriting, credit union member services\n   1 = Adjacent: general banking, fintech, debt collection, property management\n   0 = Not financial services\n   Evidence needed: What exactly does this company do? Be specific.\n\n2. COMPANY SIZE (weight 15%)\n   2 = 200-2,000 employees (sweet spot for mid-market deal)\n   1 = 100-200 or 2,000-5,000\n   0 = <100 or >5,000 — DISQUALIFY if >5,000\n   Evidence needed: Actual employee count from LinkedIn/Crunchbase/website. Say where you got it.\n\n3. PHONE OPERATION INTENSITY (weight 25%)\n   2 = 5+ phone/call center roles currently open\n   1 = 2-4 phone roles open\n   0 = Only 1 role or no clear phone operation\n   Evidence needed: How many phone-related job postings did you actually find? List the specific titles.\n\n4. AI VOICE READINESS (weight 20%)\n   2 = No evidence of any AI voice vendor (Vapi, Retell, Bland, Synthflow, Air AI, etc.)\n   1 = Uses basic IVR/phone tree but no conversational AI\n   0 = Already uses an AI voice platform — HARD DISQUALIFY\n   Evidence needed: Did you find any job postings, press releases, or tech stack mentions involving AI voice? Specifically what did you check?\n\n5. BUDGET SIGNAL (weight 10%)\n   2 = Annual revenue $100M-$5B, or raised $10M+ funding\n   1 = Revenue $50M-$100M or appears financially stable\n   0 = Can't determine revenue or very small company\n   Evidence needed: Actual revenue figure or funding amount with source.\n\n6. TIMING URGENCY (weight 10%)\n   2 = Job posted within 7 days AND 5+ roles (actively scaling now)\n   1 = Posted within 14 days OR 3+ roles\n   0 = Old posting (>14 days) or single role\n   Evidence needed: When was the posting made? How many total phone roles are open?\n\nWEIGHTED SCORE = (industry×20 + size×15 + phone×25 + ai_ready×20 + budget×10 + timing×10) / 20\nQualified if ≥ 6.0. Hard disqualify: has AI voice, government, >5K emp, <50 emp.\n\nReturn ONLY JSON:\n{"companies":[{"name":"","weighted_score":7.5,"qualified":true,"employees":"850","revenue":"$340M","has_ai_voice":false,"estimated_contract_value":"$120K","reasoning":"1 sentence summary","scores":{"industry":{"score":2,"evidence":"Mortgage servicer handling 500K+ loans"},"size":{"score":2,"evidence":"LinkedIn shows 850 employees"},"phone_intensity":{"score":2,"evidence":"6 open roles: 3x Loan Servicing Rep, 2x Collections Agent, 1x Call Center Supervisor"},"ai_readiness":{"score":2,"evidence":"No mention of Vapi/Retell/Bland in job posts or tech stack. Uses Genesys for basic IVR."},"budget":{"score":1,"evidence":"$340M revenue per Crunchbase"},"timing":{"score":2,"evidence":"Roles posted 3 days ago, 6 total openings"}},"disqualify_reason":""}]}`}],
         "ICP qualification engine. Research each company. Every score needs specific evidence — no guessing. Return ONLY valid JSON.");
       const d2 = parseJSON(s2);
