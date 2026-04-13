@@ -70,12 +70,11 @@ function parseJSON(raw) {
    useModel param: override model selection */
 async function callClaude(systemPrompt, userMessage, useWebSearch = false, maxSearchUses = 3, useModel = null) {
   const addLog = _addLog;
-  // ALL calls use Haiku — Sonnet rate limits are too aggressive for web search
+  // Haiku for everything — Sonnet rate limits too aggressive for web_search at this API tier
   const model = useModel || 'claude-haiku-4-5-20251001';
-  // Haiku + web search typically finishes in 30-45s
   const timeoutMs = useWebSearch ? 90000 : 60000;
-  // Tight max_tokens to avoid waste
-  const maxTok = useWebSearch ? 1500 : 2048;
+  // Web search needs room: tool call + response. Non-search: structured JSON.
+  const maxTok = useWebSearch ? 2048 : 1500;
 
   const body = {
     model,
@@ -435,7 +434,7 @@ function Pipeline({ hs }) {
     try {
       // ── STEP 1: Web search → prose (Sonnet + 1 combined site-targeted search) ──
       const today = new Date().toLocaleDateString();
-      log("MODEL", "Haiku", "Using Haiku for web search — fast + high rate limits");
+      log("MODEL", "Haiku", "Using Haiku for web search — zero rate limit risk");
       log("WAIT", "Warmup", "Brief 5s warmup to ensure clean rate window...");
       await countdownWait(5, log, "Warmup —");
       log("SCAN", "Indeed", `Searching site:indeed.com for: ${input.slice(0, 50)}...`);
@@ -447,8 +446,8 @@ function Pipeline({ hs }) {
       log("SCAN", "Glassdoor", `Searching site:glassdoor.com/Job for listings...`);
 
       const proseResult = await callClaude(
-        `Hiring research agent. Today: ${today}. You have exactly 1 web search — make it count.\nSearch: "${input}" hiring OR "job posting" site:indeed.com OR site:linkedin.com/jobs OR site:ziprecruiter.com OR site:glassdoor.com\n\nTarget: mid-market companies (100-5K employees). For each: company name, industry, employee count, HQ, job titles, openings count, source, date, URL. Last 14 days. NOT mega-corps.`,
-        `Search for: ${input}. Find 5-8 real companies with active job postings. Prose report — no JSON. Include employee count per company.`,
+        `Job posting researcher. Today: ${today}. You have 1 web search. Find mid-market companies (100-5000 employees) with active job postings.\n\nFor EACH company write a paragraph with ALL of these details:\n- Company name\n- Industry\n- Approximate employee count (e.g. "~500 employees")\n- HQ location\n- Specific job titles being hired\n- Number of open positions\n- Which job board (Indeed, LinkedIn, ZipRecruiter, Glassdoor)\n- URL if available\n\nSkip Fortune 500 / mega-corps. Write at least 3-4 sentences per company.`,
+        `Search: ${input}\n\nFind 5-8 real companies actively hiring. Write a detailed paragraph per company. Include employee counts. No JSON — prose only.`,
         true, 1
       );
 
@@ -490,7 +489,8 @@ function Pipeline({ hs }) {
 
       useSignals.forEach(s => {
         const age = s.days_ago ? (s.days_ago <= 3 ? "NEW" : s.days_ago <= 7 ? "OK" : "OLD") : "UNK";
-        log(age, "Signal", `${s.company} — ${s.num_openings || "?"}x ${s.role_title} (${s.location || "US"}) via ${s.source || "web"}`);
+        const dateStr = s.posted_date ? ` · Posted: ${s.posted_date}` : s.days_ago ? ` · ${s.days_ago}d ago` : "";
+        log(age, "Signal", `${s.company} — ${s.num_openings || "?"}x ${s.role_title} (${s.location || "US"}) via ${s.source || "web"}${dateStr}`);
       });
 
       log("ICP", "ICP Engine", "Running weighted 6-factor qualification model...");
@@ -593,9 +593,10 @@ function Pipeline({ hs }) {
           await sleep(200);
           log("DM", "Hunter.io", `Resolving email pattern @${(co.name || "").toLowerCase().replace(/[^a-z]/g, "")}.com...`);
 
+          const coDomain = (co.name || "").toLowerCase().replace(/[^a-z0-9]/g, "") + ".com";
           const s3 = await callClaude(
-            `Contact research agent. You have exactly 1 web search — combine everything:\nSearch: "${co.name}" VP OR Director OR "contact center" OR operations site:linkedin.com/in/ OR site:apollo.io\n\nReturn ONLY valid JSON. The linkedin_url MUST be a real linkedin.com/in/ URL if you find one.`,
-            `Find the decision maker at ${co.name} (${co.employees} emp, ${co.industry || sig?.industry || ""}) who would buy AI voice software for their call center.\n\nTarget titles: VP Operations, VP Customer Experience, Director Contact Center, COO, CTO. NOT recruiters, HR, or agents.\n\nFor email_guess: find the company's domain and use first.last@ or flast@ pattern.\nFor linkedin_url: must be a real linkedin.com/in/username URL.\nFor background: find 1-2 specific facts (alma mater, previous employer, years in role) for outreach personalization.\n\nReturn JSON:\n{"dm":{"name":"Full Name","title":"Exact Title","linkedin_url":"https://linkedin.com/in/...","email_guess":"name@company.com","confidence":"high/medium/low","why":"one line","background":"specific facts for personalization"}}`,
+            `You are a B2B sales researcher. You MUST find a REAL person's name — never return "N/A". Use your web search to look up "${co.name}" on apollo.io or linkedin. Return ONLY valid JSON — no markdown, no backticks. Start with {`,
+            `Search: "${co.name}" site:apollo.io OR site:linkedin.com/in/ VP OR Director OR operations OR "contact center"\n\nFind a REAL decision maker at ${co.name} (${co.employees} emp, ${co.industry || sig?.industry || ""}).\n\nRules:\n- You MUST return a real person's full name — NEVER "N/A" or "Unknown"\n- If you can't find the exact person, find ANY senior leader at this company\n- Target titles: VP Operations, VP Customer Experience, Director Contact Center, COO, CTO, CEO\n- For email: use ${coDomain} domain with firstname.lastname@ pattern\n- For linkedin_url: must be a real URL like https://linkedin.com/in/john-doe\n\nReturn JSON:\n{"dm":{"name":"First Last","title":"Title","linkedin_url":"https://linkedin.com/in/...","email_guess":"first.last@${coDomain}","confidence":"high/medium/low","why":"how you found them","background":"1-2 facts"}}`,
             true, 1
           );
           const d3 = parseJSON(s3);
@@ -917,7 +918,10 @@ function Pipeline({ hs }) {
                       <span style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>{item.company.name}</span>
                       <Tag color="green">Approved</Tag><Tag color="blue">{item.company.estimated_contract_value}</Tag>
                     </div>
-                    <div style={{ fontSize: 11, color: "#9ca3af" }}>{item.dm.name} &middot; {item.dm.title}</div>
+                    <div style={{ fontSize: 11, color: "#9ca3af" }}>{item.dm.name} &middot; {item.dm.title}{item.dm.email_guess ? ` · ${item.dm.email_guess}` : ""}</div>
+                    <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>
+                      {item.signal?.num_openings || "?"}x {item.signal?.role_title || "agents"} · {item.signal?.source || "web"}{item.signal?.posted_date ? ` · Posted: ${item.signal.posted_date}` : item.signal?.days_ago ? ` · ${item.signal.days_ago}d ago` : ""}
+                    </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     {item.roi?.savings > 0 && <span style={{ fontSize: 17, fontWeight: 700, color: "#10b981" }}>${Math.round(item.roi.savings / 1000)}K<span style={{ fontSize: 10, fontWeight: 400, color: "#6b7280" }}>/yr</span></span>}
@@ -1083,6 +1087,7 @@ function Pipeline({ hs }) {
                     <div>
                       <div style={{ fontSize: 15, fontWeight: 700, color: "#111827" }}>{item.company.name}</div>
                       <div style={{ fontSize: 12, color: "#6b7280" }}>{item.company.employees} emp &middot; {item.company.industry || item.signal?.industry || ""} &middot; {item.signal?.location || "US"}</div>
+                      <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>{item.signal?.num_openings || "?"}x {item.signal?.role_title || "agents"} via {item.signal?.source || "web"}{item.signal?.posted_date ? ` · Posted: ${item.signal.posted_date}` : item.signal?.days_ago ? ` · ${item.signal.days_ago}d ago` : ""}</div>
                     </div>
                     {item.roi?.savings > 0 && <div style={{ textAlign: "right" }}>
                       <div style={{ fontSize: 20, fontWeight: 700, color: "#10b981" }}>${Math.round(item.roi.savings / 1000)}K</div>
