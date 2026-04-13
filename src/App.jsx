@@ -781,135 +781,151 @@ function Pipeline({hs}) {
 
 /* ═══════════════ ARCHITECTURE ═══════════════ */
 function Arch() {
-  const Phase = ({num,title,color,tools,outputs,time}) => (
-    <div style={{ flex:1,minWidth:0 }}>
-      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:12 }}>
-        <div style={{ width:28,height:28,borderRadius:"50%",background:color,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:"#fff" }}>{num}</div>
-        <div style={{ fontSize:15,fontWeight:700,color:"#111827" }}>{title}</div>
-      </div>
-      <div style={{ background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:16,minHeight:200 }}>
-        <div style={{ fontSize:10,fontWeight:600,color:"#9ca3af",textTransform:"uppercase",letterSpacing:".05em",marginBottom:8 }}>Tools</div>
-        <div style={{ display:"flex",flexDirection:"column",gap:4,marginBottom:14 }}>
-          {tools.map(([name,c])=>(
-            <div key={name} style={{ display:"flex",alignItems:"center",gap:6,padding:"5px 10px",borderRadius:6,background:c+"0a",border:`1px solid ${c}22` }}>
-              <div style={{ width:6,height:6,borderRadius:"50%",background:c,flexShrink:0 }}/>
-              <span style={{ fontSize:11,fontWeight:500,color:c }}>{name}</span>
-            </div>
-          ))}
-        </div>
-        <div style={{ fontSize:10,fontWeight:600,color:"#9ca3af",textTransform:"uppercase",letterSpacing:".05em",marginBottom:6 }}>Output</div>
-        {outputs.map((o,i)=>(<div key={i} style={{ fontSize:11,color:"#374151",marginBottom:2 }}>→ {o}</div>))}
-        <div style={{ marginTop:10,fontSize:10,color:"#9ca3af" }}>⏱ {time}</div>
-      </div>
-    </div>
-  );
-
-  const Gate = ({num,title,action}) => (
-    <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"0 4px",flexShrink:0,width:50 }}>
-      <div style={{ width:1,height:20,background:"#fbbf24" }}/>
-      <div style={{ width:40,height:40,borderRadius:"50%",background:"#fffbeb",border:"2px solid #fbbf24",display:"flex",alignItems:"center",justifyContent:"center" }}>
-        <span style={{ fontSize:14 }}>👤</span>
-      </div>
-      <div style={{ fontSize:8,fontWeight:700,color:"#92400e",textAlign:"center",lineHeight:1.2 }}>GATE {num}</div>
-      <div style={{ fontSize:7,color:"#b45309",textAlign:"center",lineHeight:1.2,maxWidth:50 }}>{action}</div>
-      <div style={{ width:1,height:20,background:"#fbbf24" }}/>
-    </div>
-  );
+  const I = ({children,c="#6b7280"}) => <span style={{display:"inline-flex",alignItems:"center",gap:5,fontSize:12,color:c,fontWeight:500}}>{children}</span>;
+  const Dot = ({c}) => <span style={{width:7,height:7,borderRadius:"50%",background:c,display:"inline-block",flexShrink:0}}/>;
 
   return (
-    <div style={{ maxWidth:960,margin:"0 auto",padding:"40px 24px" }}>
-      <div style={{ marginBottom:28 }}>
-        <h1 style={{ fontSize:24,fontWeight:700,color:"#111827",marginBottom:4 }}>How it works</h1>
-        <p style={{ fontSize:13,color:"#6b7280" }}>Three phases. Three human gates. AI does the research — you make the calls.</p>
-      </div>
+    <div style={{ maxWidth:680,margin:"0 auto",padding:"48px 24px" }}>
+      <h1 style={{ fontSize:22,fontWeight:700,color:"#111827",marginBottom:4 }}>How it works</h1>
+      <p style={{ fontSize:13,color:"#9ca3af",marginBottom:36 }}>Three phases. Human approval between each. Nothing sends without your sign-off.</p>
 
-      {/* KPIs */}
-      <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:28 }}>
-        {[["Signals / day","6-12","#2563eb","Companies found hiring phone agents"],["Qualified","~40%","#7c3aed","Pass the 6-factor ICP scoring"],["Cost / lead","~$0.02","#0891b2","AI research cost per qualified lead"],["Your time","15 min","#f59e0b","Per batch of 5-7 companies"]].map(([l,v,c,d])=>(
-          <div key={l} style={{ background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:"14px 16px" }}>
-            <div style={{ fontSize:10,color:"#9ca3af",marginBottom:2 }}>{l}</div>
-            <div style={{ fontSize:22,fontWeight:700,color:c }}>{v}</div>
-            <div style={{ fontSize:9,color:"#d1d5db",marginTop:2 }}>{d}</div>
-          </div>
+      {/* Metrics - single line */}
+      <div style={{ display:"flex",gap:24,marginBottom:40,padding:"12px 0",borderTop:"1px solid #f3f4f6",borderBottom:"1px solid #f3f4f6" }}>
+        {[["6-12","signals/day"],["~40%","pass rate"],["$0.02","per lead"],["15 min","your time"]].map(([v,l])=>(
+          <div key={l}><span style={{fontSize:18,fontWeight:700,color:"#111827"}}>{v}</span><span style={{fontSize:11,color:"#9ca3af",marginLeft:6}}>{l}</span></div>
         ))}
       </div>
 
-      {/* 3-Phase Flow */}
-      <div style={{ display:"flex",alignItems:"stretch",gap:0,marginBottom:28 }}>
-        <Phase num="1" title="Discover" color="#2563eb"
-          tools={[["Indeed","#2164f3"],["LinkedIn Jobs","#0077b5"],["ZipRecruiter","#239846"],["Glassdoor","#0caa41"],["Google Jobs","#ea4335"],["Claude AI","#6366f1"]]}
-          outputs={["Companies hiring phone agents","ICP score with evidence","Posting date + freshness"]}
-          time="~30s automated"/>
-        <Gate num="1" action="Approve companies"/>
-        <Phase num="2" title="Enrich" color="#7c3aed"
-          tools={[["Apollo.io","#7c3aed"],["LinkedIn","#0077b5"],["Hunter.io","#ff7043"],["Crunchbase","#0288d1"]]}
-          outputs={["Decision maker name + title","Verified email address","LinkedIn profile URL","Background research"]}
-          time="~20s per company"/>
-        <Gate num="2" action="Verify contacts"/>
-        <Phase num="3" title="Activate" color="#0891b2"
-          tools={[["ROI Engine","#0891b2"],["BLS Salary Data","#1565c0"],["AI Copywriter","#6366f1"],["HubSpot CRM","#f97316"]]}
-          outputs={["ROI calc (hiring vs Feather)","Cold email ready to send","LinkedIn DM + follow-up","Thought leadership post"]}
-          time="~15s per company"/>
+      {/* STEP 1 */}
+      <div style={{ marginBottom:8 }}>
+        <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:12 }}>
+          <div style={{ width:24,height:24,borderRadius:"50%",background:"#111827",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#fff" }}>1</div>
+          <span style={{ fontSize:16,fontWeight:600,color:"#111827" }}>Discover</span>
+          <span style={{ fontSize:11,color:"#d1d5db" }}>~30s</span>
+        </div>
+        <div style={{ marginLeft:34,marginBottom:16 }}>
+          <p style={{ fontSize:13,color:"#6b7280",marginBottom:10,lineHeight:1.5 }}>Scans 5 job boards in parallel for mid-market lending & insurance companies actively hiring phone agents. Scores each against a weighted ICP model.</p>
+          <div style={{ display:"flex",flexWrap:"wrap",gap:12 }}>
+            <I c="#2164f3"><Dot c="#2164f3"/>Indeed</I>
+            <I c="#0077b5"><Dot c="#0077b5"/>LinkedIn</I>
+            <I c="#239846"><Dot c="#239846"/>ZipRecruiter</I>
+            <I c="#0caa41"><Dot c="#0caa41"/>Glassdoor</I>
+            <I c="#ea4335"><Dot c="#ea4335"/>Google Jobs</I>
+            <I c="#0288d1"><Dot c="#0288d1"/>Crunchbase</I>
+          </div>
+          <div style={{ fontSize:11,color:"#9ca3af",marginTop:8 }}>→ Company list with ICP scores, posting dates, evidence per factor</div>
+        </div>
       </div>
 
-      {/* ICP Model */}
-      <div style={{ background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:20,marginBottom:20 }}>
-        <div style={{ fontSize:14,fontWeight:700,color:"#111827",marginBottom:12 }}>ICP scoring model</div>
-        <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12 }}>
+      {/* GATE 1 */}
+      <div style={{ display:"flex",alignItems:"center",gap:10,marginLeft:10,marginBottom:8 }}>
+        <div style={{ width:4,height:4,borderRadius:"50%",background:"#f59e0b" }}/>
+        <div style={{ flex:1,height:1,background:"#fde68a" }}/>
+        <span style={{ fontSize:10,fontWeight:600,color:"#92400e",background:"#fffbeb",padding:"3px 10px",borderRadius:4,border:"1px solid #fde68a" }}>👤 You approve which companies to pursue</span>
+        <div style={{ flex:1,height:1,background:"#fde68a" }}/>
+        <div style={{ width:4,height:4,borderRadius:"50%",background:"#f59e0b" }}/>
+      </div>
+
+      {/* STEP 2 */}
+      <div style={{ marginBottom:8,marginTop:8 }}>
+        <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:12 }}>
+          <div style={{ width:24,height:24,borderRadius:"50%",background:"#111827",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#fff" }}>2</div>
+          <span style={{ fontSize:16,fontWeight:600,color:"#111827" }}>Enrich</span>
+          <span style={{ fontSize:11,color:"#d1d5db" }}>~20s per company</span>
+        </div>
+        <div style={{ marginLeft:34,marginBottom:16 }}>
+          <p style={{ fontSize:13,color:"#6b7280",marginBottom:10,lineHeight:1.5 }}>Finds the right decision maker — VP Ops, COO, or Director of Contact Center. Verifies their title, tenure, and email. Researches their background for personalized outreach.</p>
+          <div style={{ display:"flex",flexWrap:"wrap",gap:12 }}>
+            <I c="#7c3aed"><Dot c="#7c3aed"/>Apollo.io</I>
+            <I c="#0077b5"><Dot c="#0077b5"/>LinkedIn</I>
+            <I c="#ff7043"><Dot c="#ff7043"/>Hunter.io</I>
+          </div>
+          <div style={{ fontSize:11,color:"#9ca3af",marginTop:8 }}>→ Name, title, email, LinkedIn URL, confidence score, background notes</div>
+        </div>
+      </div>
+
+      {/* GATE 2 */}
+      <div style={{ display:"flex",alignItems:"center",gap:10,marginLeft:10,marginBottom:8 }}>
+        <div style={{ width:4,height:4,borderRadius:"50%",background:"#f59e0b" }}/>
+        <div style={{ flex:1,height:1,background:"#fde68a" }}/>
+        <span style={{ fontSize:10,fontWeight:600,color:"#92400e",background:"#fffbeb",padding:"3px 10px",borderRadius:4,border:"1px solid #fde68a" }}>👤 You verify each contact on LinkedIn</span>
+        <div style={{ flex:1,height:1,background:"#fde68a" }}/>
+        <div style={{ width:4,height:4,borderRadius:"50%",background:"#f59e0b" }}/>
+      </div>
+
+      {/* STEP 3 */}
+      <div style={{ marginBottom:8,marginTop:8 }}>
+        <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:12 }}>
+          <div style={{ width:24,height:24,borderRadius:"50%",background:"#111827",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#fff" }}>3</div>
+          <span style={{ fontSize:16,fontWeight:600,color:"#111827" }}>Activate</span>
+          <span style={{ fontSize:11,color:"#d1d5db" }}>~15s per company</span>
+        </div>
+        <div style={{ marginLeft:34,marginBottom:16 }}>
+          <p style={{ fontSize:13,color:"#6b7280",marginBottom:10,lineHeight:1.5 }}>Calculates ROI using BLS salary data vs Feather's $0.07/min. Drafts a cold email, LinkedIn connection note, follow-up message, and thought leadership post — all personalized to the DM.</p>
+          <div style={{ display:"flex",flexWrap:"wrap",gap:12 }}>
+            <I c="#f97316"><Dot c="#f97316"/>HubSpot</I>
+            <I c="#e01e5a"><Dot c="#e01e5a"/>Slack</I>
+            <I c="#1565c0"><Dot c="#1565c0"/>BLS Data</I>
+          </div>
+          <div style={{ fontSize:11,color:"#9ca3af",marginTop:8 }}>→ ROI breakdown, ready-to-send email, LinkedIn DM, post, one-click CRM push</div>
+        </div>
+      </div>
+
+      {/* GATE 3 */}
+      <div style={{ display:"flex",alignItems:"center",gap:10,marginLeft:10,marginBottom:32 }}>
+        <div style={{ width:4,height:4,borderRadius:"50%",background:"#f59e0b" }}/>
+        <div style={{ flex:1,height:1,background:"#fde68a" }}/>
+        <span style={{ fontSize:10,fontWeight:600,color:"#92400e",background:"#fffbeb",padding:"3px 10px",borderRadius:4,border:"1px solid #fde68a" }}>👤 You review every message before sending</span>
+        <div style={{ flex:1,height:1,background:"#fde68a" }}/>
+        <div style={{ width:4,height:4,borderRadius:"50%",background:"#f59e0b" }}/>
+      </div>
+
+      {/* ICP */}
+      <div style={{ marginBottom:32 }}>
+        <h2 style={{ fontSize:15,fontWeight:600,color:"#111827",marginBottom:12 }}>ICP scoring</h2>
+        <div style={{ borderTop:"1px solid #f3f4f6" }}>
           {[
-            ["Phone intensity","25%","#2563eb","5+ call center roles open = 2"],
-            ["Industry fit","20%","#7c3aed","Core lending/insurance = 2"],
-            ["AI readiness","20%","#0891b2","No Vapi/Retell/Bland = 2"],
-            ["Company size","15%","#f59e0b","200-2,000 employees = 2"],
-            ["Budget signal","10%","#10b981","Revenue $100M-$5B = 2"],
-            ["Timing urgency","10%","#ef4444","Posted <7d + 5 roles = 2"],
-          ].map(([name,w,c,rule])=>(
-            <div key={name} style={{ padding:"10px 12px",borderRadius:8,borderLeft:`3px solid ${c}`,background:"#f9fafb" }}>
-              <div style={{ display:"flex",justifyContent:"space-between",marginBottom:3 }}>
-                <span style={{ fontSize:12,fontWeight:600,color:"#111827" }}>{name}</span>
-                <span style={{ fontSize:12,fontWeight:700,color:c }}>{w}</span>
-              </div>
-              <div style={{ fontSize:10,color:"#6b7280" }}>{rule}</div>
+            ["Phone intensity","25%","How many call center roles are open right now"],
+            ["Industry fit","20%","Core: mortgage, insurance, credit union, loan servicing"],
+            ["AI readiness","20%","No existing Vapi, Retell, Bland, or Synthflow"],
+            ["Company size","15%","Sweet spot: 200–2,000 employees"],
+            ["Budget signal","10%","Revenue $100M–$5B or recently funded"],
+            ["Timing urgency","10%","Posted within 7 days + 5 or more openings"],
+          ].map(([name,w,desc])=>(
+            <div key={name} style={{ display:"flex",alignItems:"center",padding:"10px 0",borderBottom:"1px solid #f3f4f6" }}>
+              <span style={{ width:140,fontSize:13,fontWeight:500,color:"#111827" }}>{name}</span>
+              <span style={{ width:40,fontSize:13,fontWeight:600,color:"#2563eb",textAlign:"right" }}>{w}</span>
+              <span style={{ flex:1,fontSize:12,color:"#9ca3af",marginLeft:16 }}>{desc}</span>
             </div>
           ))}
         </div>
-        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",background:"#f0fdf4",borderRadius:6,border:"1px solid #86efac" }}>
-          <span style={{ fontSize:12,color:"#059669" }}>Qualify threshold: <strong>≥ 6.0 / 10</strong></span>
-          <span style={{ fontSize:10,color:"#059669" }}>Hard reject: has AI voice · gov · &gt;5K emp</span>
+        <div style={{ display:"flex",justifyContent:"space-between",marginTop:8,fontSize:12 }}>
+          <span style={{ color:"#059669",fontWeight:600 }}>Qualify: ≥ 6.0 / 10</span>
+          <span style={{ color:"#9ca3af" }}>Auto-reject: existing AI voice · government · &gt;5K employees</span>
         </div>
       </div>
 
-      {/* HubSpot Pipeline */}
-      <div style={{ background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:20,marginBottom:20 }}>
-        <div style={{ fontSize:14,fontWeight:700,color:"#111827",marginBottom:12 }}>HubSpot deal stages</div>
-        <div style={{ display:"flex",flexWrap:"wrap",gap:3,alignItems:"center" }}>
-          {[
-            ["Signal detected","#e5e7eb","#6b7280"],["Qualifying","#e5e7eb","#6b7280"],
-            ["⏸ Pending review","#fde68a","#92400e"],["ICP approved","#86efac","#059669"],
-            ["Finding DM","#e5e7eb","#6b7280"],["⏸ Verify DM","#fde68a","#92400e"],
-            ["Contact OK","#86efac","#059669"],["Gen outreach","#e5e7eb","#6b7280"],
-            ["⏸ Review msgs","#fde68a","#92400e"],["Sent","#bfdbfe","#2563eb"],
-            ["Meeting","#c4b5fd","#7c3aed"],["Won","#86efac","#059669"],
-          ].map(([label,bg,fg],i)=>(
-            <div key={i} style={{ display:"flex",alignItems:"center",gap:3 }}>
-              <div style={{ padding:"4px 10px",borderRadius:4,fontSize:10,fontWeight:600,background:bg,color:fg }}>{label.replace("⏸ ","")}</div>
-              {i<11 && <span style={{ color:"#d1d5db",fontSize:10 }}>›</span>}
-            </div>
-          ))}
+      {/* CRM Pipeline - minimal */}
+      <div style={{ marginBottom:32 }}>
+        <h2 style={{ fontSize:15,fontWeight:600,color:"#111827",marginBottom:12 }}>Deal stages in HubSpot</h2>
+        <div style={{ display:"flex",flexWrap:"wrap",gap:4,alignItems:"center" }}>
+          {["Signal","Qualify","Review","Approved","Find DM","Verify","Outreach","Review","Send","Meeting","Won"].map((s,i) => {
+            const isGate = s==="Review"||s==="Verify";
+            return <div key={i} style={{display:"flex",alignItems:"center",gap:4}}>
+              <span style={{ fontSize:11,fontWeight:isGate?600:400,color:isGate?"#92400e":s==="Won"?"#059669":"#374151",
+                background:isGate?"#fffbeb":s==="Won"?"#f0fdf4":"transparent",
+                padding:isGate||s==="Won"?"2px 8px":"0",borderRadius:3,
+                border:isGate?`1px solid #fde68a`:s==="Won"?"1px solid #86efac":"none"
+              }}>{isGate?"👤 ":""}{s}</span>
+              {i<10 && <span style={{color:"#e5e7eb"}}>→</span>}
+            </div>;
+          })}
         </div>
       </div>
 
-      {/* Bottom line */}
-      <div style={{ background:"#111827",borderRadius:10,padding:"20px 24px",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-        <div>
-          <div style={{ fontSize:15,fontWeight:700,color:"#fff" }}>Three gates. Zero autopilot.</div>
-          <div style={{ fontSize:12,color:"#6b7280",marginTop:2 }}>AI does the research. Humans make the decisions. Nothing ships without your approval.</div>
-        </div>
-        <div style={{ display:"flex",gap:6 }}>
-          {["Approve","Verify","Review"].map(g=>(
-            <div key={g} style={{ padding:"5px 12px",borderRadius:5,background:"#fbbf2420",border:"1px solid #fbbf2440",fontSize:11,fontWeight:600,color:"#fbbf24" }}>👤 {g}</div>
-          ))}
-        </div>
+      {/* Bottom */}
+      <div style={{ borderTop:"1px solid #f3f4f6",paddingTop:20,fontSize:12,color:"#9ca3af",lineHeight:1.6 }}>
+        AI does the research. You make the decisions. Three approval gates ensure nothing reaches a prospect without your review. Built on n8n workflows with HubSpot as the CRM layer.
       </div>
     </div>
   );
