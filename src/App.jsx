@@ -3,26 +3,36 @@ import { useState, useRef, useCallback, useEffect } from "react";
 let _apiKey = "";
 let _hubspotToken = "";
 
-async function claude(messages, system, search = true, retries = 4) {
+async function claude(messages, system, search = true, retries = 2) {
   if (!_apiKey) throw new Error("Connect your Anthropic API key to get started.");
-  const body = { model: "claude-haiku-4-5-20251001", max_tokens: 4096, messages, system };
+  const body = { model: "claude-haiku-4-5-20251001", max_tokens: search ? 2048 : 4096, messages, system };
   if (search) body.tools = [{ type: "web_search_20250305", name: "web_search" }];
   for (let attempt = 0; attempt < retries; attempt++) {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": _apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-      body: JSON.stringify(body),
-    });
-    if (res.status === 429) {
-      const wait = [15000, 30000, 45000, 60000][attempt] || 60000;
-      await new Promise(r => setTimeout(r, wait));
-      continue;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 55000); // 55s hard timeout per call
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": _apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (res.status === 429) {
+        if (attempt === retries - 1) throw new Error("Rate limited — wait 60s between runs.");
+        await new Promise(r => setTimeout(r, 12000));
+        continue;
+      }
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error?.message || `API ${res.status}`); }
+      const data = await res.json();
+      return data.content.filter(b => b.type === "text").map(b => b.text).join("\n");
+    } catch(e) {
+      clearTimeout(timeout);
+      if (e.name === 'AbortError') throw new Error("Request timed out — try again.");
+      throw e;
     }
-    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error?.message || `API ${res.status}`); }
-    const data = await res.json();
-    return data.content.filter(b => b.type === "text").map(b => b.text).join("\n");
   }
-  throw new Error("Rate limited — wait 60s and try again.");
+  throw new Error("Rate limited — wait 60s between runs.");
 }
 function parseJSON(text) {
   try {
