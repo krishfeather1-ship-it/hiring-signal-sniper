@@ -229,18 +229,28 @@ function Pipeline({hs}) {
       log("⚡","AI Agent","Analyzing hiring patterns via web search...");
 
       const today = new Date().toISOString().split("T")[0];
-      const s1 = await claude([{role:"user",content:`Today is ${today}. Identify 5-7 real US mid-market companies (200-2000 employees) in mortgage lending, insurance, or credit unions that are likely hiring phone agents or call center representatives right now. Focus on: "${input}"\n\nThink about companies known for large call center operations in these industries. NOT mega-corps (Wells Fargo, JPMorgan, GEICO, Progressive, Capital One, Bank of America, Rocket Mortgage).\n\nReturn ONLY valid JSON:\n{"signals":[{"company":"Acme Lending","role_title":"Call Center Rep","location":"Dallas, TX","num_openings":5,"industry":"mortgage","signal_strength":"high","days_ago":7,"source":"Indeed"}]}`}],
-        "Job market research agent. Return ONLY valid JSON. No markdown, no explanation.", false);
+      const s1 = await claude([{role:"user",content:`Today is ${today}. Search for companies currently hiring call center agents, phone representatives, or loan servicing reps.\n\nFocus: "${input}"\n\nUS companies, 200-2000 employees, in mortgage/lending/insurance/credit unions.\nNOT: Wells Fargo, JPMorgan, GEICO, Progressive, Capital One, Bank of America, Rocket Mortgage.\nPrioritize recent postings but include any active listings.\n\nYou MUST respond with ONLY a JSON object in this exact format — no other text:\n{"signals":[{"company":"Example Corp","role_title":"Call Center Rep","location":"Dallas, TX","num_openings":5,"industry":"mortgage","signal_strength":"high","days_ago":7,"source":"Indeed"}]}`}],
+        "You are a hiring signal detector. Your response must be ONLY a raw JSON object. Do not include any explanation, markdown, or text outside the JSON.");
       let d1 = parseJSON(s1);
       if (!d1?.signals?.length) {
-        log("⚠️","Parser","Retrying with web search...");
-        await delay(3000);
-        const s1b = await claude([{role:"user",content:`Search for 5 real US companies in mortgage, lending, or insurance currently hiring call center or phone agents. 200-2000 employees.\n\nReturn ONLY JSON:\n{"signals":[{"company":"","role_title":"","location":"","num_openings":3,"industry":"","signal_strength":"high","days_ago":7,"source":"Indeed"}]}`}],
-          "Return ONLY the JSON. Nothing else.", true);
+        // Try extracting signals from the raw text if web search results wrapped it
+        try {
+          const lines = (s1||"").split("\n");
+          for (const line of lines) {
+            const attempt = parseJSON(line);
+            if (attempt?.signals?.length) { d1 = attempt; break; }
+          }
+        } catch {}
+      }
+      if (!d1?.signals?.length) {
+        log("⚠️","Parser","First parse failed — waiting 8s then retrying...");
+        await delay(8000);
+        const s1b = await claude([{role:"user",content:`Find 5 real US companies (200-2000 employees) in mortgage, lending, or insurance that are hiring phone/call center agents right now.\n\nRespond with ONLY this JSON and absolutely nothing else:\n{"signals":[{"company":"","role_title":"","location":"","num_openings":3,"industry":"","signal_strength":"high","days_ago":7,"source":"Indeed"}]}`}],
+          "Respond with ONLY raw JSON. No text, no markdown fences, no explanation.");
         d1 = parseJSON(s1b);
       }
       if (!d1?.signals?.length) {
-        throw new Error("No signals found — try again in 60s.");
+        throw new Error("No signals found — wait 60s and try again.");
       }
       const fresh = d1.signals.filter(s => !s.days_ago || s.days_ago <= 14);
       const useSignals = fresh.length > 0 ? fresh : d1.signals;
