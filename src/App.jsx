@@ -32,8 +32,12 @@ async function hubspot(method, path, body) {
   const opts = { method, headers: { "Content-Type": "application/json", "x-hubspot-token": _hubspotToken } };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(`/api/hubspot/${path}`, opts);
-  return res.json();
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || data.error || `HubSpot ${res.status}`);
+  return data;
 }
+function parseNum(s) { if (!s) return 0; return parseInt(String(s).replace(/[^0-9]/g,""),10) || 0; }
+function truncate(s, max=500) { return s && s.length > max ? s.slice(0, max) + "..." : s; }
 function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 const PRESETS = [
@@ -128,18 +132,67 @@ function Pipeline({hs}) {
     const id = item.company.name;
     setHsStatus(p=>({...p,[id]:"pushing"}));
     try {
-      const co = await hubspot("POST","crm/v3/objects/companies",{properties:{name:item.company.name,industry:item.signal.industry,numberofemployees:item.company.employees}});
+      // 1. Create company
+      const empCount = parseNum(item.company.employees);
+      const co = await hubspot("POST","crm/v3/objects/companies",{
+        properties:{
+          name: item.company.name,
+          industry: item.signal?.industry || item.company.industry || "",
+          numberofemployees: empCount || undefined,
+          description: truncate(`Hiring signal: ${item.signal?.num_openings||"multiple"}x ${item.signal?.role_title||"phone agents"} in ${item.signal?.location||"US"}. ${item.company.reasoning||""}`, 1000)
+        }
+      });
+      const coId = co?.id;
+
+      // 2. Create contact for DM (if we have one)
       if (item.dm?.name && item.dm.name !== "N/A") {
-        const names = item.dm.name.split(" ");
-        await hubspot("POST","crm/v3/objects/contacts",{properties:{firstname:names[0]||"",lastname:names.slice(1).join(" ")||"",jobtitle:item.dm?.title||"",email:item.dm?.email_guess||"",company:item.company.name},
-          associations:co?.id?[{to:{id:co.id},types:[{associationCategory:"HUBSPOT_DEFINED",associationTypeId:280}]}]:[]});
+        const names = item.dm.name.trim().split(/\s+/);
+        const contactProps = {
+          firstname: names[0] || "",
+          lastname: names.slice(1).join(" ") || "",
+          jobtitle: item.dm.title || "",
+          company: item.company.name,
+        };
+        // Only add email if it looks valid
+        if (item.dm.email_guess && item.dm.email_guess.includes("@")) {
+          contactProps.email = item.dm.email_guess;
+        }
+        await hubspot("POST","crm/v3/objects/contacts",{
+          properties: contactProps,
+          // associationTypeId 1 = Contact → Company
+          associations: coId ? [{to:{id:coId},types:[{associationCategory:"HUBSPOT_DEFINED",associationTypeId:1}]}] : []
+        });
       }
-      await hubspot("POST","crm/v3/objects/deals",{properties:{dealname:`Signal: ${item.company.name}`,pipeline:"default",dealstage:"qualifiedtobuy",amount:String(item.roi?.savings||100000),
-        description:`DM: ${item.dm?.name} (${item.dm?.title})\nSavings: $${Math.round((item.roi?.savings||0)/1000)}K/yr\n\nEmail: ${item.outreach?.email?.subject||""}\n${item.outreach?.email?.body||""}`},
-        associations:co?.id?[{to:{id:co.id},types:[{associationCategory:"HUBSPOT_DEFINED",associationTypeId:342}]}]:[]});
+
+      // 3. Create deal
+      const savings = parseNum(item.roi?.savings);
+      const desc = truncate([
+        `Decision maker: ${item.dm?.name||"TBD"} (${item.dm?.title||""})`,
+        item.dm?.email_guess ? `Email: ${item.dm.email_guess}` : "",
+        item.dm?.linkedin_url ? `LinkedIn: ${item.dm.linkedin_url}` : "",
+        savings ? `ROI: $${Math.round(savings/1000)}K/yr savings (${item.roi?.pct||0}% reduction)` : "",
+        item.outreach?.email?.subject ? `\nEmail subject: ${item.outreach.email.subject}` : "",
+        item.outreach?.email?.body ? `Email body: ${item.outreach.email.body}` : "",
+      ].filter(Boolean).join("\n"), 2000);
+
+      await hubspot("POST","crm/v3/objects/deals",{
+        properties:{
+          dealname: `Hiring Signal: ${item.company.name}`,
+          pipeline: "default",
+          dealstage: "qualifiedtobuy",
+          amount: savings > 0 ? String(savings) : "100000",
+          description: desc,
+        },
+        // associationTypeId 5 = Deal → Company
+        associations: coId ? [{to:{id:coId},types:[{associationCategory:"HUBSPOT_DEFINED",associationTypeId:5}]}] : []
+      });
+
       setHsStatus(p=>({...p,[id]:"done"}));
-      log("🟢","HubSpot",`Created deal for ${item.company.name}`,"success");
-    } catch { setHsStatus(p=>({...p,[id]:"error"})); }
+      log("🟢","HubSpot",`Created company + contact + deal for ${item.company.name}`,"success");
+    } catch(err) {
+      setHsStatus(p=>({...p,[id]:"error"}));
+      log("🔴","HubSpot",`Failed: ${item.company.name} — ${err.message}`,"error");
+    }
   };
 
   /* ── PHASE 1: SCAN + QUALIFY ── */
@@ -179,7 +232,6 @@ function Pipeline({hs}) {
       await delay(200);
       log("🔎","G2 / Gartner","Checking AI voice vendor relationships...");
       await delay(200);
-      log("📊","ICP Model","Running weighted 6-factor scoring model...");
 
       const list = d1.signals.map((s,i) => `${i+1}. ${s.company} (${s.industry}, ${s.num_openings}x ${s.role_title}, ${s.location}, posted ${s.days_ago||"?"}d ago)`).join("\n");
       const s2 = await claude([{role:"user",content:`You are an ICP qualification engine for Feather, an AI voice calling platform for lending and insurance.\n\nCompanies to evaluate:\n${list}\n\nIMPORTANT: Research each company thoroughly. Every score MUST be backed by a specific fact you found. Do NOT guess — if you can't find evidence, score 0.\n\nScore each company using this WEIGHTED 6-FACTOR MODEL. Each factor scores 0, 1, or 2:\n\n1. INDUSTRY ALIGNMENT (weight 20%)\n   2 = Core: mortgage servicing, loan origination, insurance claims/underwriting, credit union member services\n   1 = Adjacent: general banking, fintech, debt collection, property management\n   0 = Not financial services\n   Evidence needed: What exactly does this company do? Be specific.\n\n2. COMPANY SIZE (weight 15%)\n   2 = 200-2,000 employees (sweet spot for mid-market deal)\n   1 = 100-200 or 2,000-5,000\n   0 = <100 or >5,000 — DISQUALIFY if >5,000\n   Evidence needed: Actual employee count from LinkedIn/Crunchbase/website. Say where you got it.\n\n3. PHONE OPERATION INTENSITY (weight 25%)\n   2 = 5+ phone/call center roles currently open\n   1 = 2-4 phone roles open\n   0 = Only 1 role or no clear phone operation\n   Evidence needed: How many phone-related job postings did you actually find? List the specific titles.\n\n4. AI VOICE READINESS (weight 20%)\n   2 = No evidence of any AI voice vendor (Vapi, Retell, Bland, Synthflow, Air AI, etc.)\n   1 = Uses basic IVR/phone tree but no conversational AI\n   0 = Already uses an AI voice platform — HARD DISQUALIFY\n   Evidence needed: Did you find any job postings, press releases, or tech stack mentions involving AI voice? Specifically what did you check?\n\n5. BUDGET SIGNAL (weight 10%)\n   2 = Annual revenue $100M-$5B, or raised $10M+ funding\n   1 = Revenue $50M-$100M or appears financially stable\n   0 = Can't determine revenue or very small company\n   Evidence needed: Actual revenue figure or funding amount with source.\n\n6. TIMING URGENCY (weight 10%)\n   2 = Job posted within 7 days AND 5+ roles (actively scaling now)\n   1 = Posted within 14 days OR 3+ roles\n   0 = Old posting (>14 days) or single role\n   Evidence needed: When was the posting made? How many total phone roles are open?\n\nWEIGHTED SCORE = (industry×20 + size×15 + phone×25 + ai_ready×20 + budget×10 + timing×10) / 20\nQualified if ≥ 6.0. Hard disqualify: has AI voice, government, >5K emp, <50 emp.\n\nReturn ONLY JSON:\n{"companies":[{"name":"","weighted_score":7.5,"qualified":true,"employees":"850","revenue":"$340M","has_ai_voice":false,"estimated_contract_value":"$120K","reasoning":"1 sentence summary","scores":{"industry":{"score":2,"evidence":"Mortgage servicer handling 500K+ loans"},"size":{"score":2,"evidence":"LinkedIn shows 850 employees"},"phone_intensity":{"score":2,"evidence":"6 open roles: 3x Loan Servicing Rep, 2x Collections Agent, 1x Call Center Supervisor"},"ai_readiness":{"score":2,"evidence":"No mention of Vapi/Retell/Bland in job posts or tech stack. Uses Genesys for basic IVR."},"budget":{"score":1,"evidence":"$340M revenue per Crunchbase"},"timing":{"score":2,"evidence":"Roles posted 3 days ago, 6 total openings"}},"disqualify_reason":""}]}`}],
@@ -463,8 +515,8 @@ function Pipeline({hs}) {
                           <div style={{ fontSize:10,color:e.dm.confidence==="high"?"#10b981":"#f59e0b" }}>{e.dm.confidence} confidence</div>
                         </div>
                       </div>
-                      {e.dm.linkedin_url && <div style={{ fontSize:10,color:"#0077b5",marginTop:6,marginLeft:28 }}>🔗 {e.dm.linkedin_url}</div>}
-                      {e.dm.email_guess && <div style={{ fontSize:10,color:"#6b7280",marginLeft:28 }}>📧 {e.dm.email_guess}</div>}
+                      {e.dm.linkedin_url && e.dm.linkedin_url.startsWith("http") && <div style={{ fontSize:10,color:"#0077b5",marginTop:6,marginLeft:28 }}><a href={e.dm.linkedin_url} target="_blank" rel="noopener" onClick={ev=>ev.stopPropagation()} style={{color:"#0077b5",textDecoration:"none"}}>🔗 {e.dm.linkedin_url}</a></div>}
+                      {e.dm.email_guess && e.dm.email_guess.includes("@") && <div style={{ fontSize:10,color:"#6b7280",marginLeft:28 }}>📧 {e.dm.email_guess}</div>}
                     </div>
                   );
                 })}
@@ -509,7 +561,7 @@ function Pipeline({hs}) {
                           <span style={{fontSize:13,fontWeight:600,color:"#111827"}}>Subject: {item.outreach.email.subject}</span>
                           <div style={{display:"flex",gap:6}}>
                             <CopyBtn text={`Subject: ${item.outreach.email.subject}\n\n${item.outreach.email.body}`}/>
-                            {item.dm.email_guess && <a href={`mailto:${item.dm.email_guess}?subject=${encodeURIComponent(item.outreach.email.subject)}&body=${encodeURIComponent(item.outreach.email.body)}`}
+                            {item.dm.email_guess && item.dm.email_guess.includes("@") && <a href={`mailto:${item.dm.email_guess}?subject=${encodeURIComponent(item.outreach.email.subject||"")}&body=${encodeURIComponent(item.outreach.email.body||"")}`}
                               style={{background:"#2563eb",color:"#fff",padding:"3px 12px",borderRadius:5,fontSize:11,fontWeight:600,textDecoration:"none",display:"inline-block"}}>Open in Mail ↗</a>}
                           </div>
                         </div>
@@ -517,7 +569,7 @@ function Pipeline({hs}) {
                         <pre style={{background:"#f9fafb",padding:14,borderRadius:8,border:"1px solid #f3f4f6"}}>{item.outreach.email.body}</pre>
                       </div>}
                       {tab==="linkedin" && item.outreach?.linkedin && <div>
-                        {item.dm.linkedin_url && <div style={{marginBottom:14,display:"flex",gap:8}}>
+                        {item.dm.linkedin_url && item.dm.linkedin_url.startsWith("http") && <div style={{marginBottom:14,display:"flex",gap:8}}>
                           <a href={item.dm.linkedin_url} target="_blank" rel="noopener" style={{background:"#0077b5",color:"#fff",padding:"6px 16px",borderRadius:6,fontSize:12,fontWeight:600,textDecoration:"none",display:"inline-flex",alignItems:"center",gap:6}}>
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14m-.5 15.5v-5.3a3.26 3.26 0 0 0-3.26-3.26c-.85 0-1.84.52-2.32 1.3v-1.11h-2.79v8.37h2.79v-4.93c0-.77.62-1.4 1.39-1.4a1.4 1.4 0 0 1 1.4 1.4v4.93h2.79M6.88 8.56a1.68 1.68 0 0 0 1.68-1.68c0-.93-.75-1.69-1.68-1.69a1.69 1.69 0 0 0-1.69 1.69c0 .93.76 1.68 1.69 1.68m1.39 9.94v-8.37H5.5v8.37h2.77z"/></svg>
                             Open {item.dm.name}'s profile
@@ -587,18 +639,18 @@ function Pipeline({hs}) {
                       <div style={{ fontSize:13,fontWeight:600,color:"#111827" }}>{item.dm.name}</div>
                       <div style={{ fontSize:11,color:"#6b7280" }}>{item.dm.title}</div>
                     </div>
-                    {item.dm.linkedin_url && <a href={item.dm.linkedin_url} target="_blank" rel="noopener" style={{ fontSize:10,color:"#0077b5",textDecoration:"none",fontWeight:600 }}>LinkedIn ↗</a>}
-                    {item.dm.email_guess && <span style={{ fontSize:10,color:"#6b7280" }}>{item.dm.email_guess}</span>}
+                    {item.dm.linkedin_url && item.dm.linkedin_url.startsWith("http") && <a href={item.dm.linkedin_url} target="_blank" rel="noopener" style={{ fontSize:10,color:"#0077b5",textDecoration:"none",fontWeight:600 }}>LinkedIn ↗</a>}
+                    {item.dm.email_guess && item.dm.email_guess.includes("@") && <span style={{ fontSize:10,color:"#6b7280" }}>{item.dm.email_guess}</span>}
                   </div>
 
                   <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                    {item.dm.email_guess && item.outreach?.email && (
+                    {item.dm.email_guess && item.dm.email_guess.includes("@") && item.outreach?.email && (
                       <a href={`mailto:${item.dm.email_guess}?subject=${encodeURIComponent(item.outreach.email.subject||"")}&body=${encodeURIComponent(item.outreach.email.body||"")}`}
                         style={{ padding:"7px 16px",borderRadius:6,fontSize:12,fontWeight:600,background:"#2563eb",color:"#fff",textDecoration:"none",display:"inline-flex",alignItems:"center",gap:5 }}>
                         ✉ Send email
                       </a>
                     )}
-                    {item.dm.linkedin_url && (
+                    {item.dm.linkedin_url && item.dm.linkedin_url.startsWith("http") && (
                       <a href={item.dm.linkedin_url} target="_blank" rel="noopener"
                         style={{ padding:"7px 16px",borderRadius:6,fontSize:12,fontWeight:600,background:"#0077b5",color:"#fff",textDecoration:"none",display:"inline-flex",alignItems:"center",gap:5 }}>
                         💬 Connect on LinkedIn
