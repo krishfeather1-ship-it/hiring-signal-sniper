@@ -178,17 +178,36 @@ export default function App() {
     if (k === "h") { _hubspotToken = clean; setConnected(p => ({ ...p, h: !!clean })); setHsVerified(false); }
   };
 
+  const [hsVerifyMsg, setHsVerifyMsg] = useState("");
   const verifyHubSpot = async () => {
     if (!_hubspotToken) return;
+    setHsVerifyMsg("Checking...");
     try {
       const res = await fetch("/api/hubspot/crm/v3/objects/contacts?limit=1", {
         headers: { "Content-Type": "application/json", "x-hubspot-token": _hubspotToken }
       });
-      setHsVerified(res.ok);
-      setConnected(p => ({ ...p, h: res.ok }));
-    } catch {
+      if (res.ok) {
+        // Also check we can read companies + deals (needed for push)
+        const res2 = await fetch("/api/hubspot/crm/v3/objects/companies?limit=1", {
+          headers: { "Content-Type": "application/json", "x-hubspot-token": _hubspotToken }
+        });
+        const res3 = await fetch("/api/hubspot/crm/v3/objects/deals?limit=1", {
+          headers: { "Content-Type": "application/json", "x-hubspot-token": _hubspotToken }
+        });
+        const allOk = res2.ok && res3.ok;
+        setHsVerified(allOk);
+        setConnected(p => ({ ...p, h: allOk }));
+        setHsVerifyMsg(allOk ? "Connected — contacts, companies, deals access confirmed" : `Partial access — contacts OK, companies: ${res2.ok ? "OK" : "DENIED"}, deals: ${res3.ok ? "OK" : "DENIED"}`);
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        setHsVerified(false);
+        setConnected(p => ({ ...p, h: false }));
+        setHsVerifyMsg(`Failed: ${errData.message || errData.category || res.status} — check your PAT scopes (needs crm.objects.contacts, .companies, .deals)`);
+      }
+    } catch (err) {
       setHsVerified(false);
       setConnected(p => ({ ...p, h: false }));
+      setHsVerifyMsg(`Connection error: ${err.message} — are you running the server? (npm start)`);
     }
   };
 
@@ -228,7 +247,10 @@ export default function App() {
           <Inp label="Anthropic API key" ph="sk-ant-api03-..." v={keys.a} set={v => updateKey("a", v)} ok={connected.a} pw />
           <div style={{ flex: "1 1 280px" }}>
             <Inp label="HubSpot private app token (optional)" ph="pat-na1-..." v={keys.h} set={v => updateKey("h", v)} ok={hsVerified} pw />
-            {keys.h && !hsVerified && <button onClick={verifyHubSpot} style={{ marginTop: 6, fontSize: 11, fontWeight: 600, color: "#f97316", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 5, padding: "3px 10px" }}>Verify connection</button>}
+            {keys.h && <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8 }}>
+              <button onClick={verifyHubSpot} style={{ fontSize: 11, fontWeight: 600, color: hsVerified ? "#059669" : "#f97316", background: hsVerified ? "#f0fdf4" : "#fff7ed", border: `1px solid ${hsVerified ? "#86efac" : "#fed7aa"}`, borderRadius: 5, padding: "3px 10px" }}>{hsVerified ? "Re-verify" : "Verify connection"}</button>
+              {hsVerifyMsg && <span style={{ fontSize: 10, color: hsVerified ? "#059669" : "#dc2626" }}>{hsVerifyMsg}</span>}
+            </div>}
           </div>
         </div>
       )}
@@ -287,35 +309,78 @@ function Pipeline({ hs }) {
     const id = item.company.name;
     setHsStatus(p => ({ ...p, [id]: "pushing" }));
     try {
+      log("HUB", "HubSpot", `Pushing ${item.company.name} to CRM...`);
       const empCount = parseNum(item.company.employees);
-      const co = await hubspot("POST", "crm/v3/objects/companies", {
-        properties: {
-          name: item.company.name,
-          industry: item.signal?.industry || item.company.industry || "",
-          numberofemployees: empCount || undefined,
-          description: truncate(`ICP Score: ${item.company.total_score}/10. Hiring ${item.signal?.num_openings || "multiple"}x ${item.signal?.role_title || "phone agents"}. Source: ${item.signal?.source || "web"}.`, 2000)
-        }
-      });
-      const coId = co?.id;
 
-      // Create contact — associationTypeId 1 = Contact -> Company
-      if (item.dm?.name && item.dm.name !== "N/A" && item.dm.email_guess && item.dm.email_guess.includes("@")) {
-        const names = item.dm.name.trim().split(/\s+/);
-        const contactProps = {
-          firstname: names[0] || "",
-          lastname: names.slice(1).join(" ") || "",
-          jobtitle: item.dm.title || "",
-          company: item.company.name,
-          email: item.dm.email_guess,
-          hs_content_membership_notes: truncate(item.dm.background || "", 500),
-        };
-        await hubspot("POST", "crm/v3/objects/contacts", {
-          properties: contactProps,
-          associations: coId ? [{ to: { id: coId }, types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId:1 }] }] : []
+      // ── 1. COMPANY: search for existing first, create if not found ──
+      let coId = null;
+      try {
+        const search = await hubspot("POST", "crm/v3/objects/companies/search", {
+          filterGroups: [{ filters: [{ propertyName: "name", operator: "EQ", value: item.company.name }] }],
+          limit: 1
         });
+        if (search?.results?.length > 0) {
+          coId = search.results[0].id;
+          log("HUB", "HubSpot", `Company "${item.company.name}" already exists (ID: ${coId}) — updating`, "info");
+          await hubspot("PATCH", `crm/v3/objects/companies/${coId}`, {
+            properties: {
+              industry: item.signal?.industry || item.company.industry || "",
+              numberofemployees: empCount || undefined,
+              description: truncate(`ICP Score: ${item.company.total_score}/10. Hiring ${item.signal?.num_openings || "multiple"}x ${item.signal?.role_title || "phone agents"}. Source: ${item.signal?.source || "web"}.`, 2000)
+            }
+          });
+        }
+      } catch (e) { /* search failed, create fresh */ }
+
+      if (!coId) {
+        const co = await hubspot("POST", "crm/v3/objects/companies", {
+          properties: {
+            name: item.company.name,
+            industry: item.signal?.industry || item.company.industry || "",
+            numberofemployees: empCount || undefined,
+            description: truncate(`ICP Score: ${item.company.total_score}/10. Hiring ${item.signal?.num_openings || "multiple"}x ${item.signal?.role_title || "phone agents"}. Source: ${item.signal?.source || "web"}.`, 2000)
+          }
+        });
+        coId = co?.id;
+        log("HUB", "HubSpot", `Created company "${item.company.name}" (ID: ${coId})`, "info");
       }
 
-      // Create deal — associationTypeId 5 = Deal -> Company
+      // ── 2. CONTACT: search by email first, create if not found ──
+      let contactId = null;
+      if (item.dm?.name && item.dm.name !== "N/A" && item.dm.email_guess && item.dm.email_guess.includes("@")) {
+        try {
+          const search = await hubspot("POST", "crm/v3/objects/contacts/search", {
+            filterGroups: [{ filters: [{ propertyName: "email", operator: "EQ", value: item.dm.email_guess }] }],
+            limit: 1
+          });
+          if (search?.results?.length > 0) {
+            contactId = search.results[0].id;
+            log("HUB", "HubSpot", `Contact "${item.dm.name}" already exists — updating`, "info");
+            await hubspot("PATCH", `crm/v3/objects/contacts/${contactId}`, {
+              properties: { jobtitle: item.dm.title || "", company: item.company.name }
+            });
+          }
+        } catch (e) { /* search failed, create fresh */ }
+
+        if (!contactId) {
+          const names = item.dm.name.trim().split(/\s+/);
+          const contact = await hubspot("POST", "crm/v3/objects/contacts", {
+            properties: {
+              firstname: names[0] || "",
+              lastname: names.slice(1).join(" ") || "",
+              jobtitle: item.dm.title || "",
+              company: item.company.name,
+              email: item.dm.email_guess,
+              hs_content_membership_notes: truncate(item.dm.background || "", 500),
+            },
+            associations: coId ? [{ to: { id: coId }, types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 1 }] }] : []
+          });
+          contactId = contact?.id;
+          log("HUB", "HubSpot", `Created contact "${item.dm.name}" (ID: ${contactId})`, "info");
+        }
+      }
+
+      // ── 3. DEAL: always create new (each pipeline run = new opportunity) ──
       const savings = parseNum(item.roi?.savings);
       const desc = truncate([
         `Decision maker: ${item.dm?.name || "TBD"} (${item.dm?.title || ""})`,
@@ -326,19 +391,19 @@ function Pipeline({ hs }) {
         item.outreach?.email?.body ? `Email body: ${item.outreach.email.body}` : "",
       ].filter(Boolean).join("\n"), 2000);
 
-      await hubspot("POST", "crm/v3/objects/deals", {
+      const deal = await hubspot("POST", "crm/v3/objects/deals", {
         properties: {
-          dealname: `Feather — ${item.company.name}`,
+          dealname: `Feather — ${item.company.name} — ${new Date().toLocaleDateString()}`,
           pipeline: "default",
           dealstage: "appointmentscheduled",
           amount: savings > 0 ? String(savings) : "100000",
           description: desc,
         },
-        associations: coId ? [{ to: { id: coId }, types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId:5 }] }] : []
+        associations: coId ? [{ to: { id: coId }, types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 5 }] }] : []
       });
 
       setHsStatus(p => ({ ...p, [id]: "done" }));
-      log("HUB", "HubSpot", `Created company + contact + deal for ${item.company.name}`, "success");
+      log("HUB", "HubSpot", `Pushed to CRM: company + ${contactId ? "contact + " : ""}deal for ${item.company.name}`, "success");
     } catch (err) {
       setHsStatus(p => ({ ...p, [id]: "error" }));
       log("ERR", "HubSpot", `Failed: ${item.company.name} — ${err.message}`, "error");
@@ -521,15 +586,15 @@ function Pipeline({ hs }) {
       for (const co of picked) {
         try {
           const sig = signals.find(s => s.company === co.name) || signals[0];
-          log("DM", "Apollo.io", `Searching site:apollo.io for contacts at ${co.name}...`);
+          log("DM", "Apollo.io", `Searching apollo.io/companies for ${co.name} contacts...`);
           await sleep(250);
-          log("DM", "LinkedIn", `Searching site:linkedin.com/in/ for decision makers...`);
+          log("DM", "LinkedIn", `Searching linkedin.com for decision makers at ${co.name}...`);
           await sleep(200);
-          log("DM", "Hunter.io", `Searching site:hunter.io for email pattern at ${co.name}...`);
+          log("DM", "Hunter.io", `Resolving email pattern @${(co.name || "").toLowerCase().replace(/[^a-z]/g, "")}.com...`);
 
           const s3 = await callClaude(
-            "Contact research agent. You have 2 web searches — be efficient:\n- Search 1: site:linkedin.com/in/ OR site:apollo.io — find the decision maker's name, title, and profile URL\n- Search 2: General search for their email pattern (site:hunter.io or \"email\" + company domain)\n\nFind ONE decision maker. Return ONLY valid JSON.",
-            `Find the decision maker at ${co.name} (${co.employees} emp, ${co.industry || sig?.industry || ""}) who would buy AI voice software.\n\nTarget: VP Ops, COO, Dir Contact Center, VP CX, CTO. NOT recruiters/agents/CEO.\n\nSearch LinkedIn and Apollo for real people. Guess the email using the company's domain and common patterns (first.last@ or flast@).\n\nReturn JSON:\n{"dm":{"name":"","title":"","linkedin_url":"","email_guess":"","confidence":"high/medium/low","why":"one line","background":"1-2 sentences for outreach personalization"}}`,
+            `Contact research agent. You have 2 web searches — use them well:\n- Search 1: "${co.name}" VP OR Director OR "contact center" OR operations site:linkedin.com/in/ — find real decision makers with LinkedIn profile URLs\n- Search 2: "${co.name}" email format OR "${co.name}" apollo.io — find the company's email domain and naming pattern\n\nReturn ONLY valid JSON. The linkedin_url MUST be a real linkedin.com/in/ URL if you find one.`,
+            `Find the decision maker at ${co.name} (${co.employees} emp, ${co.industry || sig?.industry || ""}) who would buy AI voice software for their call center.\n\nTarget titles: VP Operations, VP Customer Experience, Director Contact Center, COO, CTO. NOT recruiters, HR, or agents.\n\nFor email_guess: find the company's domain and use first.last@ or flast@ pattern.\nFor linkedin_url: must be a real linkedin.com/in/username URL.\nFor background: find 1-2 specific facts (alma mater, previous employer, years in role) for outreach personalization.\n\nReturn JSON:\n{"dm":{"name":"Full Name","title":"Exact Title","linkedin_url":"https://linkedin.com/in/...","email_guess":"name@company.com","confidence":"high/medium/low","why":"one line","background":"specific facts for personalization"}}`,
             true, 2
           );
           const d3 = parseJSON(s3);
