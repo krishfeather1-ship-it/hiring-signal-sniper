@@ -7,6 +7,17 @@ let _addLog = null;
 /* ═══ UTILITIES ═══ */
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 const delay = sleep;
+// Visible countdown — updates log every 5s so user knows it's not frozen
+async function countdownWait(seconds, logFn, label) {
+  const total = seconds;
+  let remaining = seconds;
+  while (remaining > 0) {
+    const chunk = Math.min(remaining, 5);
+    if (logFn && remaining < total) logFn("WAIT", "Cooldown", `${label} ${remaining}s remaining...`);
+    await sleep(chunk * 1000);
+    remaining -= chunk;
+  }
+}
 function parseNum(s) { if (!s) return 0; return parseInt(String(s).replace(/[^0-9]/g, ""), 10) || 0; }
 function truncate(s, max = 2000) { return s && s.length > max ? s.slice(0, max) : (s || ""); }
 function ts() { return new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
@@ -53,12 +64,23 @@ function parseJSON(raw) {
   return null;
 }
 
-/* ═══ CLAUDE API HELPER ═══ */
-async function callClaude(systemPrompt, userMessage, useWebSearch = false, maxSearchUses = 3) {
+/* ═══ CLAUDE API HELPER ═══
+   Model strategy: Sonnet for quality (web search, DM finding),
+   Haiku for speed (JSON parsing, outreach generation).
+   useModel param: 'sonnet' (default for search), 'haiku' (for structured output) */
+async function callClaude(systemPrompt, userMessage, useWebSearch = false, maxSearchUses = 3, useModel = null) {
   const addLog = _addLog;
+  // Pick model: Sonnet for web search + complex reasoning, Haiku for fast structured output
+  const model = useModel || (useWebSearch ? 'claude-sonnet-4-20250514' : 'claude-haiku-4-5-20251001');
+  const isSonnet = model.includes('sonnet');
+  // Sonnet + web search can take 90s+; Haiku is fast
+  const timeoutMs = (useWebSearch && isSonnet) ? 120000 : 60000;
+  // Tight max_tokens to avoid waste
+  const maxTok = useWebSearch ? 1500 : 2048;
+
   const body = {
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 2048,
+    model,
+    max_tokens: maxTok,
     system: systemPrompt,
     messages: [{ role: 'user', content: userMessage }],
   };
@@ -71,7 +93,7 @@ async function callClaude(systemPrompt, userMessage, useWebSearch = false, maxSe
 
   for (let attempt = 0; attempt < 3; attempt++) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60000);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -87,7 +109,7 @@ async function callClaude(systemPrompt, userMessage, useWebSearch = false, maxSe
       clearTimeout(timeout);
 
       if (res.status === 429 || res.status === 529) {
-        if (addLog) addLog("RATE LIMIT", `Attempt ${attempt + 1}/3 — waiting 15s...`, "orange");
+        if (addLog) addLog("RATE", "Rate Limit", `Attempt ${attempt + 1}/3 — waiting 15s...`, "orange");
         await sleep(15000);
         lastError = new Error('Rate limited');
         continue;
@@ -98,14 +120,20 @@ async function callClaude(systemPrompt, userMessage, useWebSearch = false, maxSe
       }
 
       const data = await res.json();
+      // Log token usage for budget monitoring
+      if (data.usage && addLog) {
+        const inp = data.usage.input_tokens || 0;
+        const out = data.usage.output_tokens || 0;
+        addLog("TOK", "Tokens", `${Math.round(inp/1000)}K in / ${Math.round(out/1000)}K out`, "info");
+      }
       return data.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
     } catch (err) {
       clearTimeout(timeout);
       lastError = err;
       if (err.name === 'AbortError') {
-        if (addLog) addLog("TIMEOUT", "Request timed out, retrying...", "orange");
+        if (addLog) addLog("TIME", "Timeout", `Request timed out after ${timeoutMs/1000}s — retrying...`, "orange");
       } else if (attempt < 2) {
-        if (addLog) addLog("ERROR", `${err.message.slice(0, 100)} — retrying 15s`, "red");
+        if (addLog) addLog("ERR", "Error", `${err.message.slice(0, 100)} — retrying 15s`, "red");
       }
       if (attempt < 2) await sleep(15000);
     }
@@ -330,14 +358,14 @@ function Pipeline({ hs }) {
       log("AI", "Web Search", "Scanning job boards for hiring signals...");
 
       const proseResult = await callClaude(
-        `You are a job market research agent. Search for companies actively hiring call center reps, phone agents, loan servicing reps, collections agents, or similar phone-heavy roles. Focus on mortgage, lending, insurance, and credit union companies with 100-5,000 employees. Today is ${today}. Write a clear prose report listing each company you find with: company name, industry, approximate employee count, headquarters location, specific job titles being hired, number of openings, which job board you found it on, approximate posting date, and any job URL. Prioritize postings from the last 14 days but include any active listing.`,
-        `Search for companies hiring call center or phone-based roles in financial services right now: ${input}. Find 5-8 real companies. Write a detailed report — do not output JSON.`,
+        `Hiring research agent. Today: ${today}. Search for mid-market companies (100-5K employees) in mortgage, lending, insurance, credit unions actively hiring call center/phone agents. For each: company name, industry, employee count, HQ location, job titles, openings count, job board source, posting date, URL. Prioritize last 14 days. NOT mega-corps (Wells Fargo, JPMorgan, Capital One, GEICO, BofA, Rocket Mortgage).`,
+        `Search for: ${input}. Find 5-8 real companies with active job postings. Write a prose report — no JSON.`,
         true, 3
       );
 
       // ── 20-second pause between Step 1 and Step 2 ──
       log("WAIT", "Cooldown", "Waiting 20s to avoid rate limits...");
-      await sleep(20000);
+      await countdownWait(20, log, "Rate limit cooldown —");
 
       // ── STEP 2: Parse prose → JSON (NO web search) ──
       log("PARSE", "Parser", "Converting to structured data...");
@@ -464,8 +492,8 @@ function Pipeline({ hs }) {
           log("DM", "Background", `Researching DM's career history & interests...`);
 
           const s3 = await callClaude(
-            "Contact research agent. Return ONLY valid JSON.",
-            `Find the decision maker at ${co.name} (${co.employees} employees, ${co.industry || sig?.industry || ""}) for purchasing AI voice calling software.\n\nTarget titles (priority order): VP Operations, COO, Director of Contact Center, VP Customer Experience, CTO, Director of Loan Servicing. NOT recruiters, agents, or CEO.\n\nAlso research their background: previous companies, education, LinkedIn activity, any published articles or talks.\n\nReturn JSON:\n{"dm":{"name":"","title":"","linkedin_url":"","email_guess":"","confidence":"high/medium/low","why":"","background":"2-3 sentences about their career, expertise, or recent activity that could personalize outreach"}}`,
+            "Contact research agent. Find ONE decision maker. Return ONLY valid JSON.",
+            `Find the decision maker at ${co.name} (${co.employees} emp, ${co.industry || sig?.industry || ""}) who would buy AI voice software.\n\nTarget: VP Ops, COO, Dir Contact Center, VP CX, CTO. NOT recruiters/agents/CEO.\n\nReturn JSON:\n{"dm":{"name":"","title":"","linkedin_url":"","email_guess":"","confidence":"high/medium/low","why":"one line","background":"1-2 sentences for outreach personalization"}}`,
             true, 2
           );
           const d3 = parseJSON(s3);
