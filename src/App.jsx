@@ -131,7 +131,7 @@ const T = {
   text: '#fafafa', textSecondary: '#a1a1aa', textMuted: '#71717a', textDim: '#52525b',
   blue: '#3b82f6', blueDim: '#1e3a5f', green: '#22c55e', greenDim: '#14532d',
   red: '#ef4444', redDim: '#450a0a', orange: '#f59e0b', orangeDim: '#451a03',
-  purple: '#8b5cf6', purpleDim: '#2e1065', cyan: '#06b6d4',
+  purple: '#8b5cf6', purpleDim: '#2e1065', cyan: '#06b6d4', linkedIn: '#0077b5',
 };
 
 const PRESETS = [
@@ -146,78 +146,143 @@ export default function App() {
   const [page, setPage] = useState("pipeline");
   const [keys, setKeys] = useState({ a: "", h: "" });
   const [connected, setConnected] = useState({ a: false, h: false });
+  const [hsVerified, setHsVerified] = useState(null); // null=unchecked, true=ok, false=bad
+  const [hsVerifying, setHsVerifying] = useState(false);
+
   const updateKey = (k, v) => {
     const clean = v.replace(/[^\x20-\x7E]/g, "").trim();
     setKeys(p => ({ ...p, [k]: clean }));
     if (k === "a") { _apiKey = clean; setConnected(p => ({ ...p, a: !!clean })); }
-    if (k === "h") { _hubspotToken = clean; setConnected(p => ({ ...p, h: !!clean })); }
+    if (k === "h") { _hubspotToken = clean; setConnected(p => ({ ...p, h: !!clean })); setHsVerified(null); }
   };
+
+  const verifyHubSpot = async () => {
+    if (!keys.h) return;
+    setHsVerifying(true);
+    try {
+      const res = await fetch('/api/hubspot/crm/v3/objects/companies?limit=1', {
+        headers: { 'x-hubspot-token': keys.h }
+      });
+      setHsVerified(res.ok);
+    } catch {
+      setHsVerified(false);
+    }
+    setHsVerifying(false);
+  };
+
+  const hsConnected = connected.h && hsVerified === true;
 
   return (
     <div style={{ minHeight: "100vh", background: T.bg, color: T.text, fontFamily: "'Inter',-apple-system,BlinkMacSystemFont,sans-serif" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}button{cursor:pointer;font-family:inherit}input:focus{outline:none}
-        pre{white-space:pre-wrap;word-break:break-word;margin:0;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.7;color:${T.textSecondary}}
         ::selection{background:${T.blueDim};color:${T.text}}
-        @keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
         @keyframes spin{to{transform:rotate(360deg)}}
-        @keyframes slideIn{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:translateX(0)}}
-        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
-        .fu{animation:fadeUp .3s ease-out both}.si{animation:slideIn .2s ease-out both}
-        .card{background:${T.surface};border:1px solid ${T.border};border-radius:10px;transition:border-color .15s}
-        .card:hover{border-color:${T.borderLight}}
-        input[type=password],input[type=text]{background:${T.surface};border:1px solid ${T.border};border-radius:8px;padding:8px 12px;font-size:13px;color:${T.text};font-family:'JetBrains Mono',monospace;transition:border-color .15s}
-        input[type=password]:focus,input[type=text]:focus{border-color:${T.blue}}
-        .btn-primary{background:${T.blue};color:#fff;border:none;border-radius:8px;padding:8px 20px;font-size:13px;font-weight:600;transition:opacity .15s}
-        .btn-primary:hover{opacity:.9}.btn-primary:disabled{opacity:.3;cursor:not-allowed}
-        .btn-ghost{background:transparent;border:1px solid ${T.border};color:${T.textSecondary};border-radius:8px;padding:7px 16px;font-size:12px;font-weight:500;transition:all .15s}
-        .btn-ghost:hover{border-color:${T.borderLight};color:${T.text}}
+        @keyframes slideIn{from{opacity:0;transform:translateX(-4px)}to{opacity:1;transform:translateX(0)}}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+        @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+        .fu{animation:fadeUp .25s ease-out both}.si{animation:slideIn .15s ease-out both}
+        .card{background:${T.surface};border:1px solid ${T.border};border-radius:12px;transition:border-color .2s}
+        input[type=password],input[type=text]{background:${T.surface};border:1px solid ${T.border};border-radius:8px;padding:9px 12px;font-size:13px;color:${T.text};font-family:'JetBrains Mono',monospace;transition:border-color .2s,box-shadow .2s;width:100%}
+        input[type=password]:focus,input[type=text]:focus{border-color:${T.blue};box-shadow:0 0 0 3px ${T.blueDim}44}
+        .btn-primary{background:${T.blue};color:#fff;border:none;border-radius:8px;padding:9px 20px;font-size:13px;font-weight:600;transition:opacity .15s,transform .1s;letter-spacing:.01em}
+        .btn-primary:hover{opacity:.88}.btn-primary:active{transform:scale(.98)}.btn-primary:disabled{opacity:.3;cursor:not-allowed}
+        .btn-ghost{background:transparent;border:1px solid ${T.border};color:${T.textSecondary};border-radius:8px;padding:8px 16px;font-size:12px;font-weight:500;transition:all .15s}
+        .btn-ghost:hover{border-color:${T.borderLight};color:${T.text};background:${T.surfaceHover}}
+        .btn-ghost:disabled{opacity:.3;cursor:not-allowed}
+        .tab-btn{padding:10px 18px;font-size:12.5px;font-weight:500;border:none;background:transparent;transition:color .15s;border-bottom:2px solid transparent;cursor:pointer}
+        .tab-btn:hover{color:${T.textSecondary}!important}
+        .company-card{background:${T.surface};border:2px solid ${T.border};border-radius:12px;padding:16px 18px;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+        .company-card:hover{border-color:${T.borderLight};box-shadow:0 2px 12px #000a}
+        .company-card.selected{border-color:${T.blue};box-shadow:0 0 0 1px ${T.blue}44}
+        ::-webkit-scrollbar{width:4px;height:4px}
+        ::-webkit-scrollbar-track{background:transparent}
+        ::-webkit-scrollbar-thumb{background:${T.border};border-radius:2px}
+        ::-webkit-scrollbar-thumb:hover{background:${T.borderLight}}
       `}</style>
 
-      {/* NAV */}
-      <nav style={{ background: T.bg, borderBottom: `1px solid ${T.border}`, padding: "0 28px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 52 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+      {/* ── NAV ── */}
+      <nav style={{
+        background: `${T.bg}ee`, backdropFilter: "blur(12px)", borderBottom: `1px solid ${T.border}`,
+        padding: "0 28px", display: "flex", alignItems: "center", justifyContent: "space-between",
+        height: 54, position: "sticky", top: 0, zIndex: 100
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 3L20 7.5V16.5L12 21L4 16.5V7.5L12 3Z" fill={T.blue} /><path d="M8 16c2-5 5-8 9-10-2 3-3 5.5-3.5 8.5" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" /></svg>
-            <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.03em", color: T.text }}>Feather</span>
+            <div style={{ width: 28, height: 28, borderRadius: 8, background: T.blueDim, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <path d="M12 3L20 7.5V16.5L12 21L4 16.5V7.5L12 3Z" fill={T.blue} opacity=".9"/>
+                <path d="M8 16c2-5 5-8 9-10-2 3-3 5.5-3.5 8.5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round"/>
+              </svg>
+            </div>
+            <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em", color: T.text }}>Feather</span>
+            <span style={{ fontSize: 10, color: T.textDim, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, padding: "1px 6px", fontWeight: 500 }}>Pipeline</span>
           </div>
-          <div style={{ height: 16, width: 1, background: T.border }} />
-          {[["pipeline", "Pipeline"], ["architecture", "Architecture"]].map(([id, l]) => (
+          <div style={{ height: 18, width: 1, background: T.border }} />
+          {[["pipeline", "Pipeline"], ["architecture", "How it works"]].map(([id, l]) => (
             <button key={id} onClick={() => setPage(id)} style={{
-              padding: "6px 14px", borderRadius: 6, fontSize: 13, fontWeight: 500, border: "none",
-              background: page === id ? T.blueDim : "transparent", color: page === id ? T.blue : T.textMuted
+              padding: "5px 12px", borderRadius: 6, fontSize: 13, fontWeight: 500, border: "none",
+              background: page === id ? T.blueDim : "transparent",
+              color: page === id ? T.blue : T.textMuted,
+              transition: "all .15s"
             }}>{l}</button>
           ))}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {connected.a && <span style={{ fontSize: 11, color: T.green, display: "flex", alignItems: "center", gap: 4 }}>
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.green, display: "inline-block" }} />API connected
-          </span>}
-          {connected.h && <span style={{ fontSize: 11, color: T.orange, display: "flex", alignItems: "center", gap: 4 }}>
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.orange, display: "inline-block" }} />HubSpot
-          </span>}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {connected.a && (
+            <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: T.green }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.green, display: "inline-block", animation: "pulse 2s infinite" }} />
+              Claude connected
+            </div>
+          )}
+          {connected.h && (
+            <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: hsVerified === true ? T.orange : hsVerified === false ? T.red : T.textMuted }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: hsVerified === true ? T.orange : hsVerified === false ? T.red : T.textDim, display: "inline-block" }} />
+              HubSpot {hsVerified === true ? "ready" : hsVerified === false ? "invalid" : "unverified"}
+            </div>
+          )}
         </div>
       </nav>
 
-      {/* API KEY BAR — always visible until connected */}
+      {/* ── KEYS BAR ── */}
       {(!connected.a || !connected.h) && (
-        <div style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, padding: "14px 28px", display: "flex", gap: 16, alignItems: "flex-end", flexWrap: "wrap" }} className="fu">
-          <div style={{ flex: "1 1 280px" }}>
-            <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 4 }}>Anthropic API key {connected.a && <span style={{ color: T.green }}>&#10003;</span>}</div>
-            <input type="password" placeholder="sk-ant-api03-..." value={keys.a} onChange={e => updateKey("a", e.target.value)} style={{ width: "100%", borderColor: connected.a ? T.green : T.border }} />
+        <div style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, padding: "16px 28px" }} className="fu">
+          <div style={{ maxWidth: 860, margin: "0 auto", display: "flex", gap: 14, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 260px" }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: T.textMuted, marginBottom: 6, textTransform: "uppercase", letterSpacing: ".05em" }}>
+                Anthropic API Key {connected.a && <span style={{ color: T.green, fontWeight: 700 }}>&#10003; connected</span>}
+              </div>
+              <input type="password" placeholder="sk-ant-api03-..." value={keys.a} onChange={e => updateKey("a", e.target.value)}
+                style={{ borderColor: connected.a ? T.green : T.border }} />
+            </div>
+            <div style={{ flex: "1 1 260px" }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: T.textMuted, marginBottom: 6, textTransform: "uppercase", letterSpacing: ".05em" }}>
+                HubSpot Token <span style={{ fontWeight: 400, color: T.textDim }}>(optional)</span>
+                {hsVerified === true && <span style={{ color: T.green, fontWeight: 700 }}> &#10003; verified</span>}
+                {hsVerified === false && <span style={{ color: T.red, fontWeight: 700 }}> &#10007; invalid token</span>}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input type="password" placeholder="pat-na1-..." value={keys.h} onChange={e => updateKey("h", e.target.value)}
+                  style={{ flex: 1, borderColor: hsVerified === true ? T.green : hsVerified === false ? T.red : T.border }} />
+                {connected.h && (
+                  <button onClick={verifyHubSpot} disabled={hsVerifying} className="btn-ghost" style={{ whiteSpace: "nowrap", fontSize: 11 }}>
+                    {hsVerifying ? "Checking..." : "Verify"}
+                  </button>
+                )}
+              </div>
+            </div>
+            {!connected.a && (
+              <div style={{ fontSize: 11, color: T.textDim, lineHeight: 1.6, paddingBottom: 2, flex: "0 0 200px" }}>
+                Keys stay in memory only.<br/>Never stored or sent to our servers.
+              </div>
+            )}
           </div>
-          <div style={{ flex: "1 1 280px" }}>
-            <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 4 }}>HubSpot token (optional) {connected.h && <span style={{ color: T.green }}>&#10003;</span>}</div>
-            <input type="password" placeholder="pat-na1-..." value={keys.h} onChange={e => updateKey("h", e.target.value)} style={{ width: "100%", borderColor: connected.h ? T.green : T.border }} />
-          </div>
-          {!connected.a && <div style={{ fontSize: 11, color: T.textDim, maxWidth: 300, lineHeight: 1.5, paddingBottom: 4 }}>
-            Your key stays in memory only — never stored or logged.
-          </div>}
         </div>
       )}
 
-      {page === "pipeline" ? <Pipeline hs={connected.h} /> : <Arch />}
+      {page === "pipeline" ? <Pipeline hs={hsConnected} /> : <Arch />}
     </div>
   );
 }
@@ -265,19 +330,18 @@ function Pipeline({ hs }) {
     abortRef.current?.abort();
     running.current = false;
     clearInterval(timerRef.current);
-    log("STOP", "System", "Pipeline cancelled by user", "warn");
+    log("STOP", "System", "Pipeline cancelled", "warn");
     setPhase("idle");
     setRunGuard(false);
   }, [log]);
 
-  /* ── HUBSPOT PUSH (with dedup) ── */
+  /* ── HUBSPOT PUSH ── */
   const pushHS = async (item) => {
     if (!_hubspotToken) return;
     const id = item.company.name;
     setHsStatus(p => ({ ...p, [id]: "pushing" }));
     try {
       const empCount = parseNum(item.company.employees);
-      // Search for existing company first (avoid duplicates)
       let coId = null;
       try {
         const searchRes = await hubspot("POST", "crm/v3/objects/companies/search", {
@@ -287,7 +351,7 @@ function Pipeline({ hs }) {
           coId = searchRes.results[0].id;
           log("HS", "HubSpot", `Found existing company: ${item.company.name}`, "info");
         }
-      } catch (searchErr) { /* search failed, will create new */ }
+      } catch { /* will create new */ }
 
       if (!coId) {
         const co = await hubspot("POST", "crm/v3/objects/companies", {
@@ -301,7 +365,6 @@ function Pipeline({ hs }) {
         coId = co?.id;
       }
 
-      // Contact — associationTypeId:1 = Contact -> Company
       if (item.dm?.name && item.dm.name !== "N/A" && item.dm.email_guess && item.dm.email_guess.includes("@")) {
         const names = item.dm.name.trim().split(/\s+/);
         await hubspot("POST", "crm/v3/objects/contacts", {
@@ -311,11 +374,10 @@ function Pipeline({ hs }) {
             email: item.dm.email_guess,
             hs_content_membership_notes: truncate(item.dm.background || "", 500),
           },
-          associations: coId ? [{ to: { id: coId }, types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId:1 }] }] : []
+          associations: coId ? [{ to: { id: coId }, types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 1 }] }] : []
         });
       }
 
-      // Deal — associationTypeId:5 = Deal -> Company
       const savings = parseNum(item.roi?.savings);
       const desc = truncate([
         `DM: ${item.dm?.name || "TBD"} (${item.dm?.title || ""})`,
@@ -331,17 +393,17 @@ function Pipeline({ hs }) {
           dealstage: "appointmentscheduled", amount: savings > 0 ? String(savings) : "100000",
           description: desc,
         },
-        associations: coId ? [{ to: { id: coId }, types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId:5 }] }] : []
+        associations: coId ? [{ to: { id: coId }, types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 5 }] }] : []
       });
 
       setHsStatus(p => ({ ...p, [id]: "done" }));
       log("HS", "HubSpot", `Pushed ${item.company.name}: company + contact + deal`, "success");
-    } catch(err) {
-      const reason = err.message.includes("409") ? "Duplicate record" :
-        err.message.includes("401") ? "Invalid HubSpot token" :
-        err.message.includes("429") ? "HubSpot rate limit — retry in 60s" : err.message;
+    } catch (err) {
+      const reason = err.message.includes("409") ? "Duplicate — already in HubSpot" :
+        err.message.includes("401") ? "Invalid token — re-verify in settings" :
+        err.message.includes("429") ? "Rate limit — wait 60s and retry" : err.message.slice(0, 100);
       setHsStatus(p => ({ ...p, [id]: "error" }));
-      log("ERR", "HubSpot", `Failed: ${item.company.name} — ${reason}`, "error");
+      log("ERR", "HubSpot", `${item.company.name}: ${reason}`, "error");
     }
   };
 
@@ -349,14 +411,12 @@ function Pipeline({ hs }) {
      PHASE 1: SCAN + ICP QUALIFY
 
      ICP scoring model — 6 weighted factors:
-     1. PHONE OPERATION INTENSITY — weight 25% — Evidence needed for score
-     2. INDUSTRY ALIGNMENT — weight 20% — Do NOT guess, use data
-     3. AI VOICE READINESS — weight 20% — Evidence needed for each score
+     1. PHONE OPERATION INTENSITY — weight 25%
+     2. INDUSTRY ALIGNMENT — weight 20%
+     3. AI VOICE READINESS — weight 20%
      4. COMPANY SIZE fit — weight 15%
      5. BUDGET SIGNAL — weight 10%
      6. TIMING URGENCY — weight 10%
-     Formula: (p*25 + i*20 + a*20 + s*15 + b*10 + t*10) / 20 = score out of 10
-     Threshold: >= 6.0 to qualify. Kill: AI voice vendor, gov, >5K, <50 emp.
   ══════════════════════════════════════════ */
   const runScan = useCallback(async (input) => {
     if (running.current || runGuard) return;
@@ -371,7 +431,6 @@ function Pipeline({ hs }) {
       const today = new Date().toLocaleDateString();
       log("SCAN", "System", "Starting web search for hiring signals...");
 
-      // ── STEP 1: Web search → prose (Sonnet, max_uses: 3) ──
       const proseResult = await callClaude(
         `Hiring research agent. Today: ${today}. Search for mid-market companies (100-5K employees) in mortgage, lending, insurance, credit unions actively hiring call center/phone agents. For each: company name, industry, employee count, HQ location, job titles, openings count, job board source, posting date, URL. Prioritize last 14 days. NOT mega-corps (Wells Fargo, JPMorgan, Capital One, GEICO, BofA, Rocket Mortgage).`,
         `Search for: ${input}. Find 5-8 real companies with active job postings. Write a prose report — no JSON.`,
@@ -380,13 +439,11 @@ function Pipeline({ hs }) {
 
       if (abortRef.current?.signal.aborted) throw new Error("Cancelled");
 
-      // ── 20-second pause between Step 1 and Step 2 ──
       log("WAIT", "System", "Cooling down 20s before parsing...");
       await countdownWait(20, log, "Cooldown —");
 
       if (abortRef.current?.signal.aborted) throw new Error("Cancelled");
 
-      // ── STEP 2: Parse prose → JSON (Haiku, no search) ──
       log("PARSE", "System", "Parsing results into structured data...");
       const s1 = await callClaude(
         "Convert the research report into a JSON object. Return ONLY valid JSON — no markdown, no backticks, no explanation. Start with { and key \"signals\".",
@@ -401,12 +458,11 @@ function Pipeline({ hs }) {
       if (!d1?.signals?.length) throw new Error("No signals found — try again in 60s or adjust your query.");
 
       const fresh = d1.signals.filter(s => !s.days_ago || s.days_ago <= 14);
-      const list = fresh.map(s => s);
-      const useSignals = list.length > 0 ? list : d1.signals;
+      const useSignals = fresh.length > 0 ? fresh : d1.signals;
       if (!useSignals.length) throw new Error("No signals found — try a different query.");
       setSignals(useSignals);
 
-      if (list.length === 0 && d1.signals.length > 0) log("WARN", "System", "No freshness data — showing all results");
+      if (fresh.length === 0 && d1.signals.length > 0) log("WARN", "System", "No freshness data — showing all results");
 
       useSignals.forEach(s => {
         log("SIG", "Signal", `${s.company} — ${s.num_openings || "?"}x ${s.role_title || "phone agent"} (${s.location || "US"}) via ${s.source || "web"}`);
@@ -414,7 +470,6 @@ function Pipeline({ hs }) {
 
       log("ICP", "System", "Scoring companies against ICP model...");
 
-      // ── LOCAL ICP SCORING — realistic, not inflated ──
       const aiVendorRegex = /vapi|retell|bland|synthflow|poly\.ai|replicant|parloa|five9.*ai|cognigy/i;
       const govRegex = /government|federal|state agency|municipal|county\s+of|city\s+of|dept\s+of/i;
 
@@ -426,32 +481,25 @@ function Pipeline({ hs }) {
         const days = s.days_ago || 7;
         const empNum = parseNum(s.employee_count || s.employees);
 
-        // 1. INDUSTRY ALIGNMENT (weight 20%)
         const coreInd = /mortgage|lending|loan|insurance|credit union|underwriting/i.test(fullText);
         const adjInd = /bank|fintech|financial|collection|servic/i.test(fullText);
         const industryScore = coreInd ? 2 : adjInd ? 1 : 0;
 
-        // 2. COMPANY SIZE (weight 15%) — variable, not always 2
         const sizeScore = empNum >= 200 && empNum <= 2000 ? 2 : (empNum >= 100 && empNum <= 5000) ? 1 : empNum === 0 ? 1 : 0;
 
-        // 3. PHONE OPERATION intensity (weight 25%)
         const phoneRole = /call center|phone|customer service|collections|loan servicing|inbound|outbound|representative|agent/i.test(r);
         const phoneScore = phoneRole ? (openings >= 5 ? 2 : 1) : 0;
 
-        // 4. AI VOICE READINESS (weight 20%) — check for existing vendors
         const hasAiVoice = aiVendorRegex.test(fullText);
-        const aiScore = hasAiVoice ? 0 : 1; // Default 1 (unknown), not 2
+        const aiScore = hasAiVoice ? 0 : 1;
 
-        // 5. BUDGET SIGNAL (weight 10%)
         const budgetScore = openings >= 5 ? 2 : openings >= 3 ? 1 : 0;
 
-        // 6. TIMING URGENCY (weight 10%)
         const timingScore = days <= 7 ? (openings >= 5 ? 2 : 1) : 0;
 
         const weighted = (phoneScore * 25 + industryScore * 20 + aiScore * 20 + sizeScore * 15 + budgetScore * 10 + timingScore * 10) / 20;
         const score = Math.round(weighted * 10) / 10;
 
-        // Auto-reject checks
         let rejectReason = null;
         if (hasAiVoice) rejectReason = "Has AI voice vendor";
         if (govRegex.test(fullText)) rejectReason = "Government entity";
@@ -469,16 +517,15 @@ function Pipeline({ hs }) {
           scores: { industry: industryScore, size: sizeScore, phone_intensity: phoneScore, ai_readiness: aiScore, budget: budgetScore, timing: timingScore },
           evidence: {
             industry: coreInd ? `Core ${ind} vertical` : adjInd ? "Adjacent financial services" : "Non-target industry",
-            size: empNum > 0 ? `${empNum.toLocaleString()} employees` : "Size not confirmed — defaulting to mid-market estimate",
+            size: empNum > 0 ? `${empNum.toLocaleString()} employees` : "Size not confirmed — defaulting mid-market",
             phone_intensity: `${openings} ${s.role_title || "phone"} openings found`,
-            ai_readiness: hasAiVoice ? "AI voice vendor detected — disqualified" : "No AI voice vendor detected (unverified)",
+            ai_readiness: hasAiVoice ? "AI voice vendor detected — disqualified" : "No existing AI voice vendor detected",
             budget: openings >= 5 ? `${openings} concurrent hires = strong budget signal` : openings >= 3 ? `${openings} hires = moderate budget` : "Few openings",
             timing: days <= 7 ? `Posted ~${days}d ago — urgent` : `Posted ~${days}d ago`
           }
         };
       });
 
-      // Sort by score descending
       companies.sort((a, b) => b.total_score - a.total_score);
       setQualified(companies);
 
@@ -488,7 +535,7 @@ function Pipeline({ hs }) {
       if (!companies.some(c => c.qualified)) throw new Error("No companies qualified — try a different vertical.");
       log("GATE", "System", "Awaiting your review — select companies below", "gate");
       setPhase("gate1"); clearInterval(timerRef.current);
-    } catch(e) { setError(e.message); log("ERR", "System", e.message, "error"); clearInterval(timerRef.current); setPhase("idle"); }
+    } catch (e) { setError(e.message); log("ERR", "System", e.message, "error"); clearInterval(timerRef.current); setPhase("idle"); }
     finally { running.current = false; setRunGuard(false); }
   }, [log, resetPipeline, runGuard]);
 
@@ -501,7 +548,7 @@ function Pipeline({ hs }) {
     const picked = qualified.filter(c => c.qualified && approved1.has(c.name));
     try {
       const results = [];
-      let _enrichIdx = 0;
+      let _idx = 0;
       for (const co of picked) {
         try {
           if (abortRef.current?.signal.aborted) throw new Error("Cancelled");
@@ -516,38 +563,33 @@ function Pipeline({ hs }) {
           const d3 = parseJSON(s3);
           const dm = d3?.dm || { name: "N/A", title: "Ops Leader", confidence: "low", background: "" };
 
-          // Validate email format
           if (dm.email_guess && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(dm.email_guess)) {
             dm.email_guess = ""; dm.confidence = "low";
             log("WARN", "System", `Email for ${co.name} failed format check — removed`);
           }
-          // Validate LinkedIn URL
           if (dm.linkedin_url && !dm.linkedin_url.startsWith("http")) {
             if (dm.linkedin_url.startsWith("linkedin.com") || dm.linkedin_url.startsWith("www.linkedin")) {
               dm.linkedin_url = "https://" + dm.linkedin_url;
             } else { dm.linkedin_url = ""; }
           }
-          // Check email domain vs company name
           if (dm.email_guess) {
             const emailDomain = dm.email_guess.split("@")[1]?.toLowerCase() || "";
             const coWords = co.name.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/);
             const domainMatch = coWords.some(w => w.length > 3 && emailDomain.includes(w));
-            if (!domainMatch && dm.confidence === "high") {
-              dm.confidence = "medium";
-            }
+            if (!domainMatch && dm.confidence === "high") dm.confidence = "medium";
           }
 
           log("DM", "Result", `${dm.name} — ${dm.title} (${dm.confidence})`, "success");
           results.push({ company: co, signal: sig, dm });
           setEnriched([...results]);
-          _enrichIdx++;
-          if (_enrichIdx < picked.length) { log("WAIT", "System", "Waiting 10s to avoid rate limits..."); await delay(10000); }
-        } catch(err) { log("ERR", "System", `${co.name}: ${err.message} — skipping`, "error"); _enrichIdx++; }
+          _idx++;
+          if (_idx < picked.length) { log("WAIT", "System", "Waiting 10s between searches..."); await delay(10000); }
+        } catch (err) { log("ERR", "System", `${co.name}: ${err.message} — skipping`, "error"); _idx++; }
       }
       if (results.length === 0) throw new Error("No contacts found.");
-      log("GATE", "System", "Verify contacts below — check LinkedIn profiles before proceeding", "gate");
+      log("GATE", "System", "Verify contacts — check LinkedIn before proceeding", "gate");
       setPhase("gate2"); clearInterval(timerRef.current);
-    } catch(e) { setError(e.message); log("ERR", "System", e.message, "error"); clearInterval(timerRef.current); setPhase("idle"); }
+    } catch (e) { setError(e.message); log("ERR", "System", e.message, "error"); clearInterval(timerRef.current); setPhase("idle"); }
     finally { running.current = false; }
   }, [qualified, approved1, signals, log]);
 
@@ -559,7 +601,7 @@ function Pipeline({ hs }) {
     setPhase("outreach"); timerRef.current = setInterval(() => setElapsed(p => p + 1), 1000);
     const picked = enriched.filter(e => approved2.has(e.company.name));
     try {
-      log("WAIT", "System", "Waiting 15s before outreach generation to reset rate limits...");
+      log("WAIT", "System", "Waiting 15s before generation to reset rate limits...");
       await sleep(15000);
       const results = [];
       for (let idx = 0; idx < picked.length; idx++) {
@@ -616,383 +658,791 @@ Return JSON:
           results.push({ ...item, roi: d4?.roi || {}, outreach: { email: d4?.email, linkedin: d4?.linkedin, post: d4?.post } });
           setFinal([...results]);
           if (idx < picked.length - 1) { log("WAIT", "System", "Waiting 12s between companies..."); await sleep(12000); }
-        } catch(err) { log("ERR", "System", `${item.company.name}: ${err.message} — skipping`, "error"); }
+        } catch (err) { log("ERR", "System", `${item.company.name}: ${err.message} — skipping`, "error"); }
       }
       log("DONE", "System", `Pipeline complete — ${results.length} companies ready`, "success");
       setPhase("done"); clearInterval(timerRef.current);
-    } catch(e) { setError(e.message); log("ERR", "System", e.message, "error"); clearInterval(timerRef.current); setPhase("idle"); }
+    } catch (e) { setError(e.message); log("ERR", "System", e.message, "error"); clearInterval(timerRef.current); setPhase("idle"); }
     finally { running.current = false; }
   }, [enriched, approved2, log]);
 
   const isRunning = ["scanning", "enriching", "outreach"].includes(phase);
   const stageMap = { idle: -1, scanning: 0, gate1: 1, enriching: 2, gate2: 3, outreach: 4, done: 5 };
   const stageIdx = stageMap[phase] ?? -1;
-  const STAGES = ["Scan", "Review", "Enrich", "Verify", "Outreach", "Done"];
+  const STAGES = [
+    { id: "scanning", label: "Scan" },
+    { id: "gate1", label: "Review" },
+    { id: "enriching", label: "Enrich" },
+    { id: "gate2", label: "Verify" },
+    { id: "outreach", label: "Generate" },
+    { id: "done", label: "Done" },
+  ];
   const costEst = (((_tokenAccum.input * 3 + _tokenAccum.output * 15) / 1000000) || 0).toFixed(3);
+  const qualifiedList = qualified.filter(c => c.qualified);
+  const pipelineValue = qualifiedList.reduce((sum, c) => sum + parseNum(c.estimated_contract_value?.replace(/[^0-9]/g, "")), 0);
 
   return (
-    <div style={{ maxWidth: 1140, margin: "0 auto", padding: "28px 24px" }}>
-      <div style={{ display: "flex", gap: 20 }}>
-        {/* MAIN */}
+    <div style={{ maxWidth: 1160, margin: "0 auto", padding: "28px 24px" }}>
+      <div style={{ display: "flex", gap: 22 }}>
+        {/* ── MAIN COLUMN ── */}
         <div style={{ flex: "1 1 0", minWidth: 0 }}>
 
-          {/* Input */}
-          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-            <div style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, display: "flex", alignItems: "center", padding: "0 4px 0 14px" }}>
-              <input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === "Enter" && !isRunning && runScan(query)} disabled={isRunning}
-                placeholder="Describe your target vertical..."
-                style={{ flex: 1, background: "transparent", border: "none", color: T.text, fontSize: 14, padding: "11px 0" }} />
-              <button onClick={() => runScan(query)} disabled={isRunning || !query.trim()} className="btn-primary">
-                {isRunning ? "Running..." : "Run pipeline"}
-              </button>
-            </div>
-            {isRunning && <button onClick={cancelPipeline} style={{
-              background: "transparent", color: T.red, border: `1px solid ${T.redDim}`, borderRadius: 8,
-              padding: "8px 14px", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap"
-            }}>Cancel</button>}
-          </div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 20 }}>
-            {PRESETS.map(p => (
-              <button key={p} onClick={() => { setQuery(p); if (!isRunning) runScan(p); }} disabled={isRunning} className="btn-ghost" style={{ fontSize: 11, padding: "4px 10px" }}>{p}</button>
-            ))}
-          </div>
-
-          {/* Progress bar */}
-          {stageIdx >= 0 && (
-            <div className="card fu" style={{ padding: "10px 14px", marginBottom: 14 }}>
-              <div style={{ display: "flex", gap: 2, marginBottom: 6 }}>
-                {STAGES.map((_, i) => (<div key={i} style={{ flex: 1, height: 2, borderRadius: 1, background: i <= stageIdx ? (phase === "done" ? T.green : T.blue) : T.border, transition: "background .3s" }} />))}
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  {isRunning && <div style={{ width: 10, height: 10, border: `2px solid ${T.blue}`, borderTopColor: "transparent", borderRadius: "50%", animation: "spin .8s linear infinite" }} />}
-                  {phase === "done" && <span style={{ color: T.green, fontSize: 13 }}>&#10003;</span>}
-                  <span style={{ fontSize: 12, fontWeight: 500, color: phase === "done" ? T.green : (phase === "gate1" || phase === "gate2") ? T.orange : T.blue }}>
-                    {phase === "gate1" ? "Select companies to enrich" : phase === "gate2" ? "Verify contacts before generating outreach" : phase === "done" ? "Pipeline complete" :
-                      phase === "scanning" ? "Searching and scoring..." : phase === "enriching" ? "Finding decision makers..." : phase === "outreach" ? "Generating outreach..." : STAGES[stageIdx]}
-                  </span>
-                </div>
-                <span style={{ fontSize: 11, fontFamily: "'JetBrains Mono',monospace", color: T.textDim }}>{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</span>
-              </div>
-            </div>
-          )}
-
-          {/* Empty state */}
-          {phase === "idle" && !error && (
-            <div style={{ background: T.surface, border: `1px dashed ${T.border}`, borderRadius: 12, padding: "56px 32px", textAlign: "center", marginBottom: 16 }}>
-              <div style={{ width: 48, height: 48, borderRadius: 12, background: T.blueDim, margin: "0 auto 16px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 3L20 7.5V16.5L12 21L4 16.5V7.5L12 3Z" fill={T.blue} /><path d="M8 16c2-5 5-8 9-10-2 3-3 5.5-3.5 8.5" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" /></svg>
-              </div>
-              <div style={{ fontSize: 16, fontWeight: 600, color: T.text, marginBottom: 6 }}>No pipeline running</div>
-              <div style={{ fontSize: 13, color: T.textMuted, maxWidth: 440, margin: "0 auto", lineHeight: 1.6 }}>
-                Find companies hiring phone agents, qualify against ICP, identify decision makers, and generate personalized outreach.
-              </div>
-              <div style={{ display: "flex", justifyContent: "center", gap: 16, marginTop: 20, fontSize: 12, color: T.textDim }}>
-                {["Scan job boards", "ICP qualify", "Find DMs", "Generate outreach"].map((s, i) => (
-                  <span key={s} style={{ display: "flex", alignItems: "center", gap: 8 }}>{s}{i < 3 && <span style={{ color: T.blue }}>&#8594;</span>}</span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {error && <div className="fu" style={{ background: T.redDim, border: `1px solid #7f1d1d`, borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}><span style={{ color: "#fca5a5", fontSize: 13 }}>{error}</span></div>}
-
-          {/* ═══ GATE 1 ═══ */}
-          {phase === "gate1" && (
-            <div className="fu" style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <h3 style={{ fontSize: 12, color: T.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".05em" }}>Qualified companies</h3>
-                  <button onClick={() => { const all = qualified.filter(c => c.qualified).map(c => c.name); setApproved1(approved1.size === all.length ? new Set() : new Set(all)); }}
-                    className="btn-ghost" style={{ fontSize: 10, padding: "2px 8px" }}>
-                    {approved1.size === qualified.filter(c => c.qualified).length ? "Deselect all" : "Select all"}
-                  </button>
-                </div>
-                <button onClick={runEnrich} disabled={approved1.size === 0} className="btn-primary" style={{ fontSize: 12 }}>
-                  Find decision makers ({approved1.size}) &#8594;
+          {/* ── SEARCH BAR ── */}
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, display: "flex", alignItems: "center", paddingLeft: 14, paddingRight: 4, transition: "border-color .2s", gap: 8 }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
+                  <circle cx="11" cy="11" r="8" stroke={T.textDim} strokeWidth="2"/>
+                  <path d="M21 21l-4.35-4.35" stroke={T.textDim} strokeWidth="2" strokeLinecap="round"/>
+                </svg>
+                <input value={query} onChange={e => setQuery(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && !isRunning && _apiKey && runScan(query)}
+                  disabled={isRunning} placeholder="Describe your target vertical..."
+                  style={{ flex: 1, background: "transparent", border: "none", color: T.text, fontSize: 14, padding: "12px 0", fontFamily: "inherit" }} />
+                <button onClick={() => runScan(query)} disabled={isRunning || !query.trim() || !_apiKey} className="btn-primary" style={{ padding: "8px 20px", margin: "4px" }}>
+                  {isRunning ? (
+                    <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                      <span style={{ width: 10, height: 10, border: "2px solid #fff6", borderTopColor: "#fff", borderRadius: "50%", animation: "spin .7s linear infinite", display: "inline-block" }} />
+                      Running
+                    </span>
+                  ) : "Run pipeline"}
                 </button>
               </div>
-              <div style={{ display: "grid", gap: 8 }}>
-                {qualified.filter(c => c.qualified).sort((a, b) => b.total_score - a.total_score).map((c, i) => {
-                  const on = approved1.has(c.name);
-                  const sig = signals.find(s => s.company === c.name);
-                  const days = sig?.days_ago;
-                  const freshColor = days==null ? T.textDim : days<=3 ? T.green : days<=7 ? T.orange : T.red;
-                  const freshLabel = days!=null ? (days<=1 ? "Today" : days+"d ago") : sig?.posted_date || "Recent";
-                  return (
-                    <div key={i} onClick={() => { const n = new Set(approved1); on ? n.delete(c.name) : n.add(c.name); setApproved1(n); }}
-                      style={{ background: T.surface, border: `2px solid ${on ? T.blue : T.border}`, borderRadius: 10, padding: "14px 16px", cursor: "pointer", transition: "border-color .15s" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                        <div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                            <div style={{ width: 18, height: 18, borderRadius: 5, border: `2px solid ${on ? T.blue : T.borderLight}`, background: on ? T.blue : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                              {on && <svg width="10" height="10" viewBox="0 0 12 12"><path d="M3 6l2 2 4-4" stroke="#fff" strokeWidth="2" fill="none" strokeLinecap="round" /></svg>}
-                            </div>
-                            <span style={{ fontSize: 14, fontWeight: 600, color: T.text }}>{c.name}</span>
-                            <span style={{ fontSize: 13, fontWeight: 700, color: c.total_score >= 8 ? T.green : c.total_score >= 6 ? T.blue : T.orange }}>{c.total_score}</span>
-                            <span style={{ fontSize: 10, color: T.textDim }}>/10</span>
-                            <Tag color="blue">{c.estimated_contract_value}</Tag>
-                          </div>
-                          <div style={{ fontSize: 11, color: T.textMuted, marginLeft: 26 }}>{c.employees} emp &middot; {c.industry || "Financial services"} &middot; {c.reasoning}</div>
-                          {sig && <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: 26, marginTop: 4 }}>
-                            <span style={{ fontSize: 10, fontWeight: 600, color: freshColor }}>{freshLabel}</span>
-                            <span style={{ fontSize: 10, color: T.textDim }}>{sig.source || "web"}</span>
-                            {sig.job_url && <a href={sig.job_url} target="_blank" rel="noopener" onClick={e => e.stopPropagation()} style={{ fontSize: 10, color: T.blue, textDecoration: "none" }}>View posting &#8599;</a>}
-                          </div>}
-                        </div>
-                        <span style={{ fontSize: 10, fontWeight: 600, color: on ? T.blue : T.textDim }}>{on ? "Selected" : "Click to select"}</span>
-                      </div>
-                      {/* ICP Scorecard */}
-                      {c.scores && <div style={{ marginLeft: 26, background: T.bg, borderRadius: 8, padding: "10px 12px" }} onClick={e => e.stopPropagation()}>
-                        <div style={{ fontSize: 9, fontWeight: 600, color: T.textDim, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 8 }}>ICP scorecard</div>
-                        <div style={{ display: "grid", gap: 5 }}>
-                          {[["Industry", "industry", 20], ["Size fit", "size", 15], ["Phone intensity", "phone_intensity", 25],
-                            ["AI readiness", "ai_readiness", 20], ["Budget signal", "budget", 10], ["Timing", "timing", 10]
-                          ].map(([label, key, weight]) => {
-                            const val = c.scores[key] || 0;
-                            const pct = (val / 2) * 100;
-                            const proof = c.evidence?.[key] || "";
-                            return (
-                              <div key={key}>
-                                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 1 }}>
-                                  <div style={{ width: 85, fontSize: 10, fontWeight: 500, color: T.textSecondary, flexShrink: 0 }}>{label} <span style={{ color: T.textDim }}>({weight}%)</span></div>
-                                  <div style={{ flex: 1, height: 4, background: T.border, borderRadius: 2, overflow: "hidden" }}>
-                                    <div style={{ width: `${pct}%`, height: "100%", borderRadius: 2, background: val === 2 ? T.green : val === 1 ? T.orange : T.red, transition: "width .3s" }} />
-                                  </div>
-                                  <span style={{ fontSize: 10, fontWeight: 600, color: val === 2 ? T.green : val === 1 ? T.orange : T.red, width: 14, textAlign: "right" }}>{val}</span>
-                                </div>
-                                {proof && <div style={{ fontSize: 9, color: T.textDim, marginLeft: 91, lineHeight: 1.3 }}>{proof}</div>}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>}
-                    </div>
-                  );
-                })}
+              {isRunning && (
+                <button onClick={cancelPipeline} style={{
+                  background: T.redDim, color: T.red, border: `1px solid #7f1d1d`,
+                  borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap"
+                }}>Stop</button>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+              {PRESETS.map(p => (
+                <button key={p} onClick={() => { setQuery(p); if (!isRunning && _apiKey) runScan(p); }}
+                  disabled={isRunning} className="btn-ghost"
+                  style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6 }}>{p}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* ── PROGRESS ── */}
+          {stageIdx >= 0 && (
+            <div className="card fu" style={{ padding: "14px 18px", marginBottom: 16 }}>
+              {/* Stage labels */}
+              <div style={{ display: "flex", marginBottom: 8 }}>
+                {STAGES.map((s, i) => (
+                  <div key={s.id} style={{ flex: 1, textAlign: "center" }}>
+                    <span style={{
+                      fontSize: 10, fontWeight: 600,
+                      color: i < stageIdx ? (phase === "done" ? T.green : T.blue) :
+                        i === stageIdx ? (phase === "done" ? T.green : T.blue) : T.textDim,
+                      textTransform: "uppercase", letterSpacing: ".04em"
+                    }}>{s.label}</span>
+                  </div>
+                ))}
               </div>
-              {qualified.filter(c => !c.qualified).length > 0 && (
-                <div style={{ marginTop: 10, fontSize: 11, color: T.textDim }}>
-                  Filtered: {qualified.filter(c => !c.qualified).map(c => `${c.name}${c.reject_reason ? ` (${c.reject_reason})` : ""}`).join(", ")}
+              {/* Progress bar */}
+              <div style={{ display: "flex", gap: 3, marginBottom: 10 }}>
+                {STAGES.map((_, i) => (
+                  <div key={i} style={{ flex: 1, height: 3, borderRadius: 2, overflow: "hidden", background: T.bg }}>
+                    <div style={{
+                      height: "100%", borderRadius: 2,
+                      background: i < stageIdx ? (phase === "done" ? T.green : T.blue) :
+                        i === stageIdx ? (isRunning ? T.blue : phase === "done" ? T.green : T.orange) : "transparent",
+                      transition: "background .4s",
+                      width: i < stageIdx ? "100%" : i === stageIdx ? "100%" : "0%"
+                    }} />
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  {isRunning && <div style={{ width: 8, height: 8, border: `2px solid ${T.blue}`, borderTopColor: "transparent", borderRadius: "50%", animation: "spin .7s linear infinite" }} />}
+                  {phase === "done" && <span style={{ color: T.green }}>&#10003;</span>}
+                  <span style={{ fontSize: 12.5, fontWeight: 500, color: phase === "done" ? T.green : (phase === "gate1" || phase === "gate2") ? T.orange : isRunning ? T.blue : T.textSecondary }}>
+                    {phase === "gate1" ? "Select companies to enrich" :
+                      phase === "gate2" ? "Verify contacts before generating outreach" :
+                      phase === "done" ? "Pipeline complete" :
+                      phase === "scanning" ? "Searching job boards and scoring..." :
+                      phase === "enriching" ? "Finding decision makers..." :
+                      phase === "outreach" ? "Generating personalized outreach..." : ""}
+                  </span>
+                </div>
+                <span style={{ fontSize: 11, fontFamily: "'JetBrains Mono',monospace", color: T.textDim }}>
+                  {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* ── ERROR ── */}
+          {error && (
+            <div className="fu" style={{ background: T.redDim, border: `1px solid #7f1d1d`, borderRadius: 10, padding: "12px 16px", marginBottom: 14, display: "flex", alignItems: "center", gap: 10 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke={T.red} strokeWidth="2"/><path d="M12 8v4M12 16h.01" stroke={T.red} strokeWidth="2" strokeLinecap="round"/></svg>
+              <span style={{ color: "#fca5a5", fontSize: 13 }}>{error}</span>
+            </div>
+          )}
+
+          {/* ── EMPTY STATE ── */}
+          {phase === "idle" && !error && (
+            <div className="fu" style={{ background: T.surface, border: `1px dashed ${T.border}`, borderRadius: 14, padding: "60px 32px", textAlign: "center", marginBottom: 16 }}>
+              <div style={{ width: 56, height: 56, borderRadius: 16, background: T.blueDim, margin: "0 auto 18px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 3L20 7.5V16.5L12 21L4 16.5V7.5L12 3Z" fill={T.blue} opacity=".9"/>
+                  <path d="M8 16c2-5 5-8 9-10-2 3-3 5.5-3.5 8.5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round"/>
+                </svg>
+              </div>
+              <div style={{ fontSize: 17, fontWeight: 700, color: T.text, marginBottom: 8 }}>Ready to find buyers</div>
+              <div style={{ fontSize: 13, color: T.textMuted, maxWidth: 420, margin: "0 auto 24px", lineHeight: 1.7 }}>
+                Feather scans job boards for companies hiring phone agents — your best signal that AI voice can save them money. You stay in control at every step.
+              </div>
+              <div style={{ display: "flex", justifyContent: "center", gap: 0 }}>
+                {["Scan signals", "ICP qualify", "Find DMs", "Generate outreach"].map((s, i, arr) => (
+                  <span key={s} style={{ display: "flex", alignItems: "center" }}>
+                    <span style={{ fontSize: 12, color: T.textMuted, background: T.bg, padding: "5px 12px", borderRadius: 6, border: `1px solid ${T.border}` }}>{s}</span>
+                    {i < arr.length - 1 && <span style={{ color: T.textDim, margin: "0 4px", fontSize: 12 }}>&#8594;</span>}
+                  </span>
+                ))}
+              </div>
+              {!_apiKey && (
+                <div style={{ marginTop: 20, fontSize: 12, color: T.orange, background: T.orangeDim, border: `1px solid ${T.orange}33`, borderRadius: 8, padding: "8px 16px", display: "inline-block" }}>
+                  Add your Anthropic API key above to get started
                 </div>
               )}
             </div>
           )}
 
-          {/* ═══ GATE 2 ═══ */}
-          {phase === "gate2" && (
+          {/* ══════════════════════════════════════════
+              GATE 1: COMPANY REVIEW
+          ══════════════════════════════════════════ */}
+          {phase === "gate1" && (
             <div className="fu" style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <h3 style={{ fontSize: 12, color: T.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".05em" }}>Verify contacts</h3>
-                  <button onClick={() => { const all = enriched.map(e => e.company.name); setApproved2(approved2.size === all.length ? new Set() : new Set(all)); }}
-                    className="btn-ghost" style={{ fontSize: 10, padding: "2px 8px" }}>
-                    {approved2.size === enriched.length ? "Deselect all" : "Select all"}
-                  </button>
+              {/* Summary banner */}
+              <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: "14px 18px", marginBottom: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+                  <div style={{ display: "flex", gap: 24 }}>
+                    <div>
+                      <div style={{ fontSize: 10, color: T.textDim, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 2 }}>Scanned</div>
+                      <div style={{ fontSize: 22, fontWeight: 700, color: T.text }}>{signals.length}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 10, color: T.textDim, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 2 }}>Qualified</div>
+                      <div style={{ fontSize: 22, fontWeight: 700, color: T.green }}>{qualifiedList.length}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 10, color: T.textDim, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 2 }}>Selected</div>
+                      <div style={{ fontSize: 22, fontWeight: 700, color: T.blue }}>{approved1.size}</div>
+                    </div>
+                    {pipelineValue > 0 && (
+                      <div>
+                        <div style={{ fontSize: 10, color: T.textDim, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 2 }}>Est. pipeline</div>
+                        <div style={{ fontSize: 22, fontWeight: 700, color: T.orange }}>${Math.round(pipelineValue / 1000)}K</div>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <button onClick={() => {
+                      const all = qualifiedList.map(c => c.name);
+                      setApproved1(approved1.size === all.length ? new Set() : new Set(all));
+                    }} className="btn-ghost" style={{ fontSize: 11, padding: "6px 12px" }}>
+                      {approved1.size === qualifiedList.length ? "Deselect all" : "Select all"}
+                    </button>
+                    <button onClick={runEnrich} disabled={approved1.size === 0} className="btn-primary">
+                      Find decision makers ({approved1.size}) &#8594;
+                    </button>
+                  </div>
                 </div>
-                <button onClick={runOutreach} disabled={approved2.size === 0} className="btn-primary" style={{ fontSize: 12 }}>
-                  Generate outreach ({approved2.size}) &#8594;
-                </button>
               </div>
-              <div style={{ display: "grid", gap: 8 }}>
-                {enriched.map((e, i) => {
-                  const on = approved2.has(e.company.name);
-                  const confColor = e.dm.confidence === "high" ? T.green : e.dm.confidence === "medium" ? T.orange : T.red;
+
+              {/* Company cards */}
+              <div style={{ display: "grid", gap: 10 }}>
+                {qualifiedList.map((c, i) => {
+                  const on = approved1.has(c.name);
+                  const sig = signals.find(s => s.company === c.name);
+                  const days = sig?.days_ago;
+                  const freshColor = days == null ? T.textDim : days <= 3 ? T.green : days <= 7 ? T.orange : T.red;
+                  const freshLabel = days != null ? (days <= 1 ? "Today" : `${days}d ago`) : sig?.posted_date || "Recent";
+                  const scoreColor = c.total_score >= 8 ? T.green : c.total_score >= 6.5 ? T.blue : T.orange;
+
                   return (
-                    <div key={i} onClick={() => { const n = new Set(approved2); on ? n.delete(e.company.name) : n.add(e.company.name); setApproved2(n); }}
-                      style={{ background: T.surface, border: `2px solid ${on ? T.blue : T.border}`, borderRadius: 10, padding: "14px 16px", cursor: "pointer", transition: "border-color .15s" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                        <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                          <div style={{ width: 18, height: 18, borderRadius: 5, border: `2px solid ${on ? T.blue : T.borderLight}`, background: on ? T.blue : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 2 }}>
-                            {on && <svg width="10" height="10" viewBox="0 0 12 12"><path d="M3 6l2 2 4-4" stroke="#fff" strokeWidth="2" fill="none" strokeLinecap="round" /></svg>}
+                    <div key={i} className={`company-card ${on ? "selected" : ""}`}
+                      onClick={() => { const n = new Set(approved1); on ? n.delete(c.name) : n.add(c.name); setApproved1(n); }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                        {/* Left: checkbox + info */}
+                        <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flex: 1, minWidth: 0 }}>
+                          <div style={{
+                            width: 20, height: 20, borderRadius: 6, flexShrink: 0, marginTop: 1,
+                            border: `2px solid ${on ? T.blue : T.borderLight}`,
+                            background: on ? T.blue : "transparent",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            transition: "all .15s"
+                          }}>
+                            {on && <svg width="11" height="11" viewBox="0 0 12 12"><path d="M2.5 6l2.5 2.5 4.5-5" stroke="#fff" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                           </div>
-                          <div>
-                            <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>{e.company.name}</div>
-                            <div style={{ fontSize: 11, color: T.textMuted }}>{e.company.employees} emp &middot; {e.company.industry || ""}</div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
+                              <span style={{ fontSize: 15, fontWeight: 700, color: T.text }}>{c.name}</span>
+                              <div style={{ display: "flex", alignItems: "baseline", gap: 2 }}>
+                                <span style={{ fontSize: 18, fontWeight: 800, color: scoreColor, lineHeight: 1 }}>{c.total_score}</span>
+                                <span style={{ fontSize: 10, color: T.textDim }}>/10</span>
+                              </div>
+                              <span style={{ fontSize: 10, fontWeight: 600, background: T.blueDim, color: T.blue, padding: "2px 8px", borderRadius: 4 }}>{c.estimated_contract_value}</span>
+                            </div>
+                            <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 6 }}>
+                              {c.employees} employees &middot; {c.industry || "Financial services"} &middot; {c.reasoning}
+                            </div>
+                            {sig && (
+                              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                <span style={{ fontSize: 11, fontWeight: 700, color: freshColor }}>{freshLabel}</span>
+                                <span style={{ fontSize: 11, color: T.textDim }}>via {sig.source || "job board"}</span>
+                                {sig.job_url && (
+                                  <a href={sig.job_url} target="_blank" rel="noopener"
+                                    onClick={e => e.stopPropagation()}
+                                    style={{ fontSize: 11, color: T.blue, textDecoration: "none", display: "flex", alignItems: "center", gap: 3 }}>
+                                    View posting
+                                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6m0 0v6m0-6L10 14" stroke={T.blue} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                  </a>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
-                        <div style={{ textAlign: "right", flexShrink: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: T.purple }}>{e.dm.name}</div>
-                          <div style={{ fontSize: 11, color: T.textMuted }}>{e.dm.title}</div>
-                          <div style={{ fontSize: 10, color: confColor, fontWeight: 500 }}>{e.dm.confidence} confidence</div>
+                        {/* Right: mini score badge */}
+                        <div style={{ flexShrink: 0, textAlign: "right" }}>
+                          <div style={{ fontSize: 10, color: on ? T.blue : T.textDim, fontWeight: 600, textTransform: "uppercase" }}>
+                            {on ? "Selected" : "Click to select"}
+                          </div>
                         </div>
                       </div>
-                      {/* DM details */}
-                      <div style={{ marginLeft: 26, marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
-                        {e.dm.why && <div style={{ fontSize: 11, color: T.textSecondary }}>{e.dm.why}</div>}
-                        {e.dm.background && <div style={{ fontSize: 11, color: T.textMuted, padding: "6px 10px", background: T.bg, borderRadius: 6, borderLeft: `2px solid ${T.purple}`, lineHeight: 1.5 }}>{e.dm.background}</div>}
-                        <div style={{ display: "flex", gap: 12, marginTop: 2 }}>
-                          {e.dm.linkedin_url && e.dm.linkedin_url.startsWith("http") && <a href={e.dm.linkedin_url} target="_blank" rel="noopener" onClick={ev => ev.stopPropagation()} style={{ fontSize: 11, color: T.cyan, textDecoration: "none" }}>LinkedIn &#8599;</a>}
-                          {e.dm.email_guess && e.dm.email_guess.includes("@") && <span style={{ fontSize: 11, color: T.textDim }}>{e.dm.email_guess}</span>}
+
+                      {/* ICP Scorecard */}
+                      {c.scores && (
+                        <div style={{ marginTop: 12, marginLeft: 32, background: T.bg, borderRadius: 8, padding: "10px 14px" }}
+                          onClick={e => e.stopPropagation()}>
+                          <div style={{ fontSize: 9, fontWeight: 700, color: T.textDim, textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 8 }}>ICP Scorecard</div>
+                          <div style={{ display: "grid", gap: 5 }}>
+                            {[
+                              ["Phone intensity", "phone_intensity", 25],
+                              ["Industry fit", "industry", 20],
+                              ["AI readiness", "ai_readiness", 20],
+                              ["Company size", "size", 15],
+                              ["Budget signal", "budget", 10],
+                              ["Timing urgency", "timing", 10],
+                            ].map(([label, key, weight]) => {
+                              const val = c.scores[key] || 0;
+                              const pct = (val / 2) * 100;
+                              const proof = c.evidence?.[key] || "";
+                              const barColor = val === 2 ? T.green : val === 1 ? T.orange : T.redDim;
+                              return (
+                                <div key={key}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                                    <div style={{ width: 100, fontSize: 10, fontWeight: 500, color: T.textSecondary, flexShrink: 0 }}>
+                                      {label} <span style={{ color: T.textDim }}>({weight}%)</span>
+                                    </div>
+                                    <div style={{ flex: 1, height: 4, background: T.border, borderRadius: 2, overflow: "hidden" }}>
+                                      <div style={{ width: `${pct}%`, height: "100%", borderRadius: 2, background: barColor, transition: "width .4s" }} />
+                                    </div>
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: val === 2 ? T.green : val === 1 ? T.orange : T.red, width: 12, textAlign: "right" }}>{val}</span>
+                                  </div>
+                                  {proof && <div style={{ fontSize: 9, color: T.textDim, marginLeft: 108, lineHeight: 1.4 }}>{proof}</div>}
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   );
                 })}
               </div>
+
+              {/* Rejected companies */}
+              {qualified.filter(c => !c.qualified).length > 0 && (
+                <div style={{ marginTop: 10, padding: "10px 14px", background: T.bg, borderRadius: 8, border: `1px solid ${T.border}` }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: T.textDim, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 4 }}>Auto-rejected</div>
+                  <div style={{ fontSize: 11, color: T.textDim, lineHeight: 1.7 }}>
+                    {qualified.filter(c => !c.qualified).map(c => (
+                      <span key={c.name} style={{ marginRight: 12 }}>
+                        {c.name} <span style={{ color: T.red }}>({c.reject_reason || `${c.total_score}/10`})</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Bottom CTA */}
+              <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
+                <button onClick={runEnrich} disabled={approved1.size === 0} className="btn-primary">
+                  Find decision makers for {approved1.size} {approved1.size === 1 ? "company" : "companies"} &#8594;
+                </button>
+              </div>
             </div>
           )}
 
-          {/* ═══ RESULTS ═══ */}
-          {final.map((item, i) => {
-            const isExp = expanded === i; const tab = tabs[i] || "roi"; const hss = hsStatus[item.company.name];
-            return (
-              <div key={i} className="card fu" style={{ marginBottom: 8, overflow: "hidden" }}>
-                <div onClick={() => setExpanded(isExp ? null : i)} style={{ padding: "12px 16px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
-                      <span style={{ fontSize: 14, fontWeight: 600, color: T.text }}>{item.company.name}</span>
-                      {item.roi?.savings > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: T.green }}>${Math.round(item.roi.savings / 1000)}K<span style={{ fontSize: 10, fontWeight: 400, color: T.textDim }}>/yr</span></span>}
-                    </div>
-                    <div style={{ fontSize: 11, color: T.textMuted }}>{item.dm.name} &middot; {item.dm.title}</div>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    {hs && <button onClick={e => { e.stopPropagation(); pushHS(item); }} disabled={hss === "pushing" || hss === "done"} style={{
-                      padding: "5px 12px", borderRadius: 6, fontSize: 11, fontWeight: 600, border: "none",
-                      background: hss === "done" ? T.greenDim : hss === "error" ? T.redDim : hss === "pushing" ? T.border : T.blueDim,
-                      color: hss === "done" ? T.green : hss === "error" ? T.red : hss === "pushing" ? T.textDim : T.blue, cursor: hss === "done" ? "default" : "pointer"
-                    }}>{hss === "pushing" ? "Pushing..." : hss === "done" ? "&#10003; In HubSpot" : hss === "error" ? "&#10007; Retry" : "&#8594; HubSpot"}</button>}
-                    <span style={{ color: T.textDim, fontSize: 12, transition: "transform .2s", transform: isExp ? "rotate(90deg)" : "none" }}>&#9656;</span>
+          {/* ══════════════════════════════════════════
+              GATE 2: CONTACT VERIFICATION
+          ══════════════════════════════════════════ */}
+          {phase === "gate2" && (
+            <div className="fu" style={{ marginBottom: 16 }}>
+              {/* Warning banner */}
+              <div style={{ background: T.orangeDim, border: `1px solid ${T.orange}44`, borderRadius: 10, padding: "12px 16px", marginBottom: 14, display: "flex", alignItems: "flex-start", gap: 10 }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0, marginTop: 1 }}>
+                  <path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke={T.orange} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: T.orange, marginBottom: 2 }}>Verify before proceeding</div>
+                  <div style={{ fontSize: 11, color: "#fcd34d", lineHeight: 1.5 }}>
+                    AI-found contacts may be outdated. Click LinkedIn links to confirm job titles are current. Remove anyone whose role has changed before generating outreach.
                   </div>
                 </div>
-                {isExp && (
-                  <div style={{ borderTop: `1px solid ${T.border}` }}>
-                    <div style={{ display: "flex", borderBottom: `1px solid ${T.border}` }}>
-                      {[["roi", "ROI"], ["email", "Email"], ["linkedin", "LinkedIn"], ["post", "Post"]].map(([id, l]) => (
-                        <button key={id} onClick={() => setTabs(p => ({ ...p, [i]: id }))} style={{
-                          padding: "9px 16px", fontSize: 12, fontWeight: 500, border: "none",
-                          borderBottom: tab === id ? `2px solid ${T.blue}` : "2px solid transparent",
-                          background: "transparent", color: tab === id ? T.blue : T.textMuted
-                        }}>{l}</button>
-                      ))}
-                    </div>
-                    <div style={{ padding: 16 }}>
-                      {tab === "roi" && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-                        <MetricCard l="Current hiring cost" v={`$${Math.round((item.roi?.hiring_annual || 0) / 1000)}K/yr`} c={T.red} />
-                        <MetricCard l="Feather cost" v={`$${Math.round((item.roi?.feather_annual || 0) / 1000)}K/yr`} c={T.blue} />
-                        <MetricCard l="Annual savings" v={`$${Math.round((item.roi?.savings || 0) / 1000)}K`} s={`${item.roi?.pct || 0}% reduction`} c={T.green} />
-                      </div>}
-                      {tab === "email" && item.outreach?.email && <div>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                          <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>Subject: {item.outreach.email.subject}</span>
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <CopyBtn text={`Subject: ${item.outreach.email.subject}\n\n${item.outreach.email.body}`} />
-                            {item.dm.email_guess && item.dm.email_guess.includes("@") && <a href={`mailto:${item.dm.email_guess || ""}?subject=${encodeURIComponent(item.outreach.email.subject || "")}&body=${encodeURIComponent(item.outreach.email.body || "")}`}
-                              className="btn-primary" style={{ padding: "3px 12px", fontSize: 11, textDecoration: "none", display: "inline-block" }}>Send &#8599;</a>}
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: T.textMuted, textTransform: "uppercase", letterSpacing: ".05em" }}>
+                    {enriched.length} contacts found
+                  </span>
+                  <span style={{ fontSize: 11, color: T.textDim }}>&middot; {approved2.size} selected</span>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => {
+                    const all = enriched.map(e => e.company.name);
+                    setApproved2(approved2.size === all.length ? new Set() : new Set(all));
+                  }} className="btn-ghost" style={{ fontSize: 11, padding: "6px 12px" }}>
+                    {approved2.size === enriched.length ? "Deselect all" : "Select all"}
+                  </button>
+                  <button onClick={runOutreach} disabled={approved2.size === 0} className="btn-primary">
+                    Generate outreach ({approved2.size}) &#8594;
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gap: 10 }}>
+                {enriched.map((e, i) => {
+                  const on = approved2.has(e.company.name);
+                  const confColor = e.dm.confidence === "high" ? T.green : e.dm.confidence === "medium" ? T.orange : T.red;
+                  const confBg = e.dm.confidence === "high" ? T.greenDim : e.dm.confidence === "medium" ? T.orangeDim : T.redDim;
+                  const initials = e.dm.name !== "N/A" ? e.dm.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase() : "?";
+
+                  return (
+                    <div key={i} className={`company-card ${on ? "selected" : ""}`}
+                      onClick={() => { const n = new Set(approved2); on ? n.delete(e.company.name) : n.add(e.company.name); setApproved2(n); }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                        {/* Checkbox + company info */}
+                        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                          <div style={{
+                            width: 20, height: 20, borderRadius: 6, flexShrink: 0, marginTop: 2,
+                            border: `2px solid ${on ? T.blue : T.borderLight}`,
+                            background: on ? T.blue : "transparent",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            transition: "all .15s"
+                          }}>
+                            {on && <svg width="11" height="11" viewBox="0 0 12 12"><path d="M2.5 6l2.5 2.5 4.5-5" stroke="#fff" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>{e.company.name}</div>
+                            <div style={{ fontSize: 11, color: T.textMuted }}>{e.company.employees} employees &middot; {e.company.industry || "Financial services"}</div>
+                            <div style={{ fontSize: 11, color: T.textDim, marginTop: 2 }}>{e.company.reasoning}</div>
                           </div>
                         </div>
-                        {item.dm.email_guess && <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 8 }}>To: {item.dm.email_guess}</div>}
-                        <pre style={{ background: T.bg, padding: 14, borderRadius: 8, border: `1px solid ${T.border}` }}>{item.outreach.email.body}</pre>
-                      </div>}
-                      {tab === "linkedin" && item.outreach?.linkedin && <div>
-                        {item.dm.linkedin_url && item.dm.linkedin_url.startsWith("http") && <div style={{ marginBottom: 14 }}>
-                          <a href={item.dm.linkedin_url} target="_blank" rel="noopener" style={{ background: "#0077b5", color: "#fff", padding: "6px 14px", borderRadius: 6, fontSize: 12, fontWeight: 600, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                            Open {item.dm.name.split(" ")[0]}'s profile &#8599;
-                          </a>
-                        </div>}
-                        <div style={{ marginBottom: 14 }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                            <span style={{ fontSize: 11, color: T.textMuted, fontWeight: 600, textTransform: "uppercase" }}>Connection note</span>
+
+                        {/* Contact card */}
+                        <div style={{ flexShrink: 0, display: "flex", gap: 12, alignItems: "flex-start" }} onClick={ev => ev.stopPropagation()}>
+                          {/* Avatar */}
+                          <div style={{
+                            width: 38, height: 38, borderRadius: "50%", background: T.purpleDim,
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            fontSize: 13, fontWeight: 700, color: T.purple, flexShrink: 0
+                          }}>{initials}</div>
+                          <div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 1 }}>{e.dm.name}</div>
+                            <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 4 }}>{e.dm.title}</div>
                             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <span style={{ fontSize: 10, color: (item.outreach.linkedin.note?.length || 0) > 300 ? T.red : T.textDim }}>{item.outreach.linkedin.note?.length || 0}/300</span>
-                              <CopyBtn text={item.outreach.linkedin.note} />
+                              <span style={{ fontSize: 10, fontWeight: 700, color: confColor, background: confBg, padding: "2px 8px", borderRadius: 4 }}>
+                                {e.dm.confidence} confidence
+                              </span>
+                              {e.dm.linkedin_url && e.dm.linkedin_url.startsWith("http") && (
+                                <a href={e.dm.linkedin_url} target="_blank" rel="noopener"
+                                  style={{ fontSize: 11, color: T.linkedIn, fontWeight: 600, textDecoration: "none", display: "flex", alignItems: "center", gap: 3, background: "#0077b522", padding: "2px 8px", borderRadius: 4 }}>
+                                  LinkedIn
+                                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6m0 0v6m0-6L10 14" stroke={T.linkedIn} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                </a>
+                              )}
                             </div>
                           </div>
-                          <pre style={{ background: T.bg, padding: 12, borderRadius: 8, border: `1px solid ${T.border}`, borderLeft: `3px solid #0077b5` }}>{item.outreach.linkedin.note}</pre>
                         </div>
-                        <div>
-                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                            <span style={{ fontSize: 11, color: T.textMuted, fontWeight: 600, textTransform: "uppercase" }}>Follow-up message</span>
-                            <CopyBtn text={item.outreach.linkedin.followup} />
-                          </div>
-                          <pre style={{ background: T.bg, padding: 12, borderRadius: 8, border: `1px solid ${T.border}`, borderLeft: `3px solid ${T.purple}` }}>{item.outreach.linkedin.followup}</pre>
+                      </div>
+
+                      {/* Background + email */}
+                      {(e.dm.background || e.dm.email_guess || e.dm.why) && (
+                        <div style={{ marginTop: 12, marginLeft: 30, display: "flex", flexDirection: "column", gap: 6 }} onClick={ev => ev.stopPropagation()}>
+                          {e.dm.why && <div style={{ fontSize: 11, color: T.textMuted, fontStyle: "italic" }}>{e.dm.why}</div>}
+                          {e.dm.background && (
+                            <div style={{ fontSize: 11, color: T.textSecondary, background: T.bg, borderLeft: `3px solid ${T.purple}`, borderRadius: "0 6px 6px 0", padding: "8px 12px", lineHeight: 1.6 }}>
+                              {e.dm.background}
+                            </div>
+                          )}
+                          {e.dm.email_guess && e.dm.email_guess.includes("@") && (
+                            <div style={{ fontSize: 11, color: T.textDim, display: "flex", alignItems: "center", gap: 6 }}>
+                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" stroke={T.textDim} strokeWidth="2"/><polyline points="22,6 12,13 2,6" stroke={T.textDim} strokeWidth="2"/></svg>
+                              <span style={{ fontFamily: "'JetBrains Mono',monospace" }}>{e.dm.email_guess}</span>
+                            </div>
+                          )}
                         </div>
-                      </div>}
-                      {tab === "post" && item.outreach?.post && <div>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                          <span style={{ fontSize: 11, color: T.textMuted, fontWeight: 600, textTransform: "uppercase" }}>LinkedIn post</span>
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <span style={{ fontSize: 10, color: T.textDim }}>{item.outreach.post?.length || 0} chars</span>
-                            <CopyBtn text={item.outreach.post} />
-                          </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
+                <button onClick={runOutreach} disabled={approved2.size === 0} className="btn-primary">
+                  Generate outreach for {approved2.size} {approved2.size === 1 ? "contact" : "contacts"} &#8594;
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ══════════════════════════════════════════
+              RESULTS
+          ══════════════════════════════════════════ */}
+          <div style={{ display: "grid", gap: 10 }}>
+            {final.map((item, i) => {
+              const isExp = expanded === i;
+              const tab = tabs[i] || "email";
+              const hss = hsStatus[item.company.name];
+              const confColor = item.dm.confidence === "high" ? T.green : item.dm.confidence === "medium" ? T.orange : T.red;
+
+              return (
+                <div key={i} className="card fu" style={{ overflow: "hidden" }}>
+                  {/* Accordion header */}
+                  <div onClick={() => setExpanded(isExp ? null : i)}
+                    style={{ padding: "14px 18px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 14, flex: 1, minWidth: 0 }}>
+                      {/* Company + DM */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 3 }}>
+                          <span style={{ fontSize: 15, fontWeight: 700, color: T.text }}>{item.company.name}</span>
+                          {item.roi?.savings > 0 && (
+                            <span style={{ fontSize: 14, fontWeight: 800, color: T.green }}>
+                              ${Math.round(item.roi.savings / 1000)}K<span style={{ fontSize: 10, fontWeight: 400, color: T.textDim }}>/yr saved</span>
+                            </span>
+                          )}
                         </div>
-                        <pre style={{ background: T.bg, padding: 14, borderRadius: 8, border: `1px solid ${T.border}`, lineHeight: 1.7 }}>{item.outreach.post}</pre>
-                      </div>}
+                        <div style={{ fontSize: 12, color: T.textMuted, display: "flex", alignItems: "center", gap: 6 }}>
+                          <span>{item.dm.name}</span>
+                          <span style={{ color: T.textDim }}>&middot;</span>
+                          <span>{item.dm.title}</span>
+                          {item.dm.confidence && (
+                            <span style={{ fontSize: 10, fontWeight: 600, color: confColor }}>({item.dm.confidence})</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                      {hs && (
+                        <button onClick={() => pushHS(item)} disabled={hss === "pushing" || hss === "done"}
+                          style={{
+                            padding: "6px 14px", borderRadius: 7, fontSize: 11, fontWeight: 600, border: "none",
+                            background: hss === "done" ? T.greenDim : hss === "error" ? T.redDim : hss === "pushing" ? T.surface : T.orangeDim,
+                            color: hss === "done" ? T.green : hss === "error" ? T.red : hss === "pushing" ? T.textDim : T.orange,
+                            cursor: hss === "done" ? "default" : "pointer", transition: "all .15s",
+                            display: "flex", alignItems: "center", gap: 5
+                          }}>
+                          {hss === "pushing" ? (
+                            <><span style={{ width: 8, height: 8, border: `2px solid ${T.textDim}`, borderTopColor: "transparent", borderRadius: "50%", animation: "spin .7s linear infinite", display: "inline-block" }} />Pushing</>
+                          ) : hss === "done" ? "&#10003; In HubSpot" : hss === "error" ? "Retry" : "Push to HubSpot"}
+                        </button>
+                      )}
+                      <div onClick={() => setExpanded(isExp ? null : i)} style={{ cursor: "pointer", color: T.textDim, transform: isExp ? "rotate(90deg)" : "none", transition: "transform .2s", fontSize: 14 }}>&#9656;</div>
                     </div>
                   </div>
-                )}
-              </div>
-            );
-          })}
 
-          {/* ═══ COMPLETE ═══ */}
-          {phase === "done" && final.length > 0 && (
-            <div className="fu" style={{ marginTop: 12 }}>
-              <div style={{ padding: "14px 18px", background: T.greenDim, border: `1px solid #166534`, borderRadius: 10, marginBottom: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: T.green }}>Pipeline complete</span>
-                  <span style={{ fontSize: 11, fontFamily: "'JetBrains Mono',monospace", color: T.green }}>{Math.floor(elapsed / 60)}m {elapsed % 60}s &middot; ~${costEst} API cost</span>
+                  {/* Expanded content */}
+                  {isExp && (
+                    <div style={{ borderTop: `1px solid ${T.border}` }}>
+                      {/* Tabs */}
+                      <div style={{ display: "flex", borderBottom: `1px solid ${T.border}`, paddingLeft: 8 }}>
+                        {[["email", "Cold Email"], ["linkedin", "LinkedIn"], ["post", "Post"], ["roi", "ROI"]].map(([id, l]) => (
+                          <button key={id} className="tab-btn" onClick={() => setTabs(p => ({ ...p, [i]: id }))} style={{
+                            color: tab === id ? T.blue : T.textMuted,
+                            borderBottomColor: tab === id ? T.blue : "transparent",
+                          }}>{l}</button>
+                        ))}
+                      </div>
+
+                      <div style={{ padding: "18px 20px" }}>
+                        {/* EMAIL TAB */}
+                        {tab === "email" && item.outreach?.email && (
+                          <div>
+                            {/* Email card */}
+                            <div style={{ background: T.bg, border: `1px solid ${T.border}`, borderRadius: 10, overflow: "hidden", marginBottom: 12 }}>
+                              {/* Email header */}
+                              <div style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}` }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                                  <div style={{ flex: 1 }}>
+                                    {item.dm.email_guess && item.dm.email_guess.includes("@") && (
+                                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                                        <span style={{ fontSize: 10, fontWeight: 600, color: T.textDim, textTransform: "uppercase", letterSpacing: ".05em", width: 36 }}>To</span>
+                                        <span style={{ fontSize: 12, color: T.textSecondary, fontFamily: "'JetBrains Mono',monospace" }}>{item.dm.email_guess}</span>
+                                      </div>
+                                    )}
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                      <span style={{ fontSize: 10, fontWeight: 600, color: T.textDim, textTransform: "uppercase", letterSpacing: ".05em", width: 36 }}>Re</span>
+                                      <span style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{item.outreach.email.subject}</span>
+                                    </div>
+                                  </div>
+                                  <div style={{ display: "flex", gap: 8, flexShrink: 0, marginLeft: 12 }}>
+                                    <CopyBtn text={`Subject: ${item.outreach.email.subject}\n\n${item.outreach.email.body}`} label="Copy email" />
+                                    {item.dm.email_guess && item.dm.email_guess.includes("@") && (
+                                      <a href={`mailto:${item.dm.email_guess}?subject=${encodeURIComponent(item.outreach.email.subject || "")}&body=${encodeURIComponent(item.outreach.email.body || "")}`}
+                                        className="btn-primary" style={{ padding: "6px 14px", fontSize: 11, textDecoration: "none", display: "flex", alignItems: "center", gap: 5 }}>
+                                        Send
+                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6m0 0v6m0-6L10 14" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                      </a>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                              {/* Email body */}
+                              <div style={{ padding: "16px 20px" }}>
+                                {(item.outreach.email.body || "").split("\n").map((line, li) => (
+                                  <p key={li} style={{ fontSize: 13, color: T.textSecondary, lineHeight: 1.75, marginBottom: line ? 0 : 8, minHeight: line ? "auto" : 8 }}>{line || "\u00A0"}</p>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* LINKEDIN TAB */}
+                        {tab === "linkedin" && item.outreach?.linkedin && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                            {/* Profile link */}
+                            {item.dm.linkedin_url && item.dm.linkedin_url.startsWith("http") && (
+                              <a href={item.dm.linkedin_url} target="_blank" rel="noopener"
+                                style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "#0077b5", color: "#fff", padding: "8px 16px", borderRadius: 8, fontSize: 12, fontWeight: 600, textDecoration: "none", width: "fit-content" }}>
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="#fff"><path d="M16 8a6 6 0 016 6v7h-4v-7a2 2 0 00-2-2 2 2 0 00-2 2v7h-4v-7a6 6 0 016-6zM2 9h4v12H2z"/><circle cx="4" cy="4" r="2"/></svg>
+                                Open {item.dm.name?.split(" ")[0]}'s LinkedIn
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6m0 0v6m0-6L10 14" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                              </a>
+                            )}
+
+                            {/* Step 1: Connection note */}
+                            <div style={{ background: T.bg, border: `1px solid ${T.border}`, borderRadius: 10, overflow: "hidden" }}>
+                              <div style={{ padding: "10px 16px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                <div>
+                                  <span style={{ fontSize: 11, fontWeight: 700, color: T.text }}>Step 1 — Connection Request</span>
+                                  <span style={{ fontSize: 10, color: T.textDim, marginLeft: 8 }}>Send when connecting</span>
+                                </div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                  <span style={{ fontSize: 10, color: (item.outreach.linkedin.note?.length || 0) > 280 ? T.red : T.textDim, fontFamily: "'JetBrains Mono',monospace" }}>
+                                    {item.outreach.linkedin.note?.length || 0}/300
+                                  </span>
+                                  <CopyBtn text={item.outreach.linkedin.note} />
+                                </div>
+                              </div>
+                              <div style={{ padding: "14px 18px", borderLeft: `3px solid ${T.linkedIn}` }}>
+                                {(item.outreach.linkedin.note || "").split("\n").map((line, li) => (
+                                  <p key={li} style={{ fontSize: 13, color: T.textSecondary, lineHeight: 1.75, marginBottom: line ? 0 : 6, minHeight: line ? "auto" : 6 }}>{line || "\u00A0"}</p>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Step 2: Follow-up */}
+                            <div style={{ background: T.bg, border: `1px solid ${T.border}`, borderRadius: 10, overflow: "hidden" }}>
+                              <div style={{ padding: "10px 16px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                <div>
+                                  <span style={{ fontSize: 11, fontWeight: 700, color: T.text }}>Step 2 — Follow-up Message</span>
+                                  <span style={{ fontSize: 10, color: T.textDim, marginLeft: 8 }}>Send after they accept</span>
+                                </div>
+                                <CopyBtn text={item.outreach.linkedin.followup} />
+                              </div>
+                              <div style={{ padding: "14px 18px", borderLeft: `3px solid ${T.purple}` }}>
+                                {(item.outreach.linkedin.followup || "").split("\n").map((line, li) => (
+                                  <p key={li} style={{ fontSize: 13, color: T.textSecondary, lineHeight: 1.75, marginBottom: line ? 0 : 6, minHeight: line ? "auto" : 6 }}>{line || "\u00A0"}</p>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* POST TAB */}
+                        {tab === "post" && item.outreach?.post && (
+                          <div>
+                            {/* LinkedIn post preview */}
+                            <div style={{ background: "#1b1f23", border: `1px solid #30363d`, borderRadius: 12, overflow: "hidden", maxWidth: 560, marginBottom: 10 }}>
+                              {/* Post header */}
+                              <div style={{ padding: "14px 16px 10px", display: "flex", gap: 10, alignItems: "flex-start" }}>
+                                <div style={{ width: 40, height: 40, borderRadius: "50%", background: T.blueDim, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: T.blue, flexShrink: 0 }}>K</div>
+                                <div>
+                                  <div style={{ fontSize: 13, fontWeight: 700, color: "#e6edf3" }}>Krish Desai</div>
+                                  <div style={{ fontSize: 11, color: "#7d8590" }}>Founder at Feather &middot; Just now</div>
+                                </div>
+                              </div>
+                              {/* Post body */}
+                              <div style={{ padding: "0 16px 14px" }}>
+                                {(item.outreach.post || "").split("\n").map((line, li) => (
+                                  <p key={li} style={{ fontSize: 13, color: "#e6edf3", lineHeight: 1.75, marginBottom: line ? 0 : 8, minHeight: line ? "auto" : 8 }}>{line || "\u00A0"}</p>
+                                ))}
+                              </div>
+                              {/* Engagement bar */}
+                              <div style={{ borderTop: "1px solid #30363d", padding: "8px 16px", display: "flex", gap: 20 }}>
+                                {["👍 Like", "💬 Comment", "🔁 Repost"].map(a => (
+                                  <span key={a} style={{ fontSize: 11, color: "#7d8590" }}>{a}</span>
+                                ))}
+                              </div>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <span style={{ fontSize: 10, color: T.textDim }}>{item.outreach.post?.length || 0} chars</span>
+                              <CopyBtn text={item.outreach.post} label="Copy post" />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* ROI TAB */}
+                        {tab === "roi" && (
+                          <div>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr auto 1fr", gap: 8, alignItems: "center", marginBottom: 16 }}>
+                              <div style={{ background: T.bg, border: `1px solid ${T.border}`, borderRadius: 10, padding: "14px 16px", borderTop: `3px solid ${T.red}` }}>
+                                <div style={{ fontSize: 10, fontWeight: 600, color: T.textDim, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>Current cost</div>
+                                <div style={{ fontSize: 24, fontWeight: 800, color: T.red }}>${Math.round((item.roi?.hiring_annual || 0) / 1000)}K</div>
+                                <div style={{ fontSize: 10, color: T.textDim, marginTop: 3 }}>per year</div>
+                              </div>
+                              <div style={{ textAlign: "center", color: T.textDim, fontSize: 18 }}>&#8594;</div>
+                              <div style={{ background: T.bg, border: `1px solid ${T.border}`, borderRadius: 10, padding: "14px 16px", borderTop: `3px solid ${T.blue}` }}>
+                                <div style={{ fontSize: 10, fontWeight: 600, color: T.textDim, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>With Feather</div>
+                                <div style={{ fontSize: 24, fontWeight: 800, color: T.blue }}>${Math.round((item.roi?.feather_annual || 0) / 1000)}K</div>
+                                <div style={{ fontSize: 10, color: T.textDim, marginTop: 3 }}>per year</div>
+                              </div>
+                              <div style={{ textAlign: "center", color: T.green, fontSize: 18 }}>&#8594;</div>
+                              <div style={{ background: T.greenDim, border: `1px solid #166534`, borderRadius: 10, padding: "14px 16px", borderTop: `3px solid ${T.green}` }}>
+                                <div style={{ fontSize: 10, fontWeight: 600, color: T.green, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 6 }}>Annual savings</div>
+                                <div style={{ fontSize: 24, fontWeight: 800, color: T.green }}>${Math.round((item.roi?.savings || 0) / 1000)}K</div>
+                                <div style={{ fontSize: 10, color: T.green, marginTop: 3, opacity: .8 }}>{item.roi?.pct || 0}% reduction</div>
+                              </div>
+                            </div>
+                            <div style={{ fontSize: 11, color: T.textDim, lineHeight: 1.6, background: T.bg, borderRadius: 8, padding: "10px 14px", border: `1px solid ${T.border}` }}>
+                              Based on {item.signal?.num_openings || 8} agents &times; $45K salary &times; 1.3 benefits + $4K training vs. Feather at $0.07/min for 50 calls/day/agent, 5min avg, 250 days/yr.
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-                  <Stat l="Scanned" v={signals.length} /><Stat l="Qualified" v={qualified.filter(c => c.qualified).length} /><Stat l="Outreach ready" v={final.length} /><Stat l="Total savings" v={`$${Math.round(final.reduce((s, e) => s + (e.roi?.savings || 0), 0) / 1000)}K/yr`} />
+              );
+            })}
+          </div>
+
+          {/* ── DONE STATE ── */}
+          {phase === "done" && final.length > 0 && (
+            <div className="fu" style={{ marginTop: 14 }}>
+              <div style={{ background: T.greenDim, border: `1px solid #166534`, borderRadius: 12, padding: "16px 20px", marginBottom: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: T.green, marginBottom: 2 }}>Pipeline complete</div>
+                    <div style={{ fontSize: 11, color: T.green, opacity: .7 }}>{Math.floor(elapsed / 60)}m {elapsed % 60}s total &middot; ~${costEst} API cost</div>
+                  </div>
+                  {hs && (
+                    <div style={{ fontSize: 11, color: T.green }}>
+                      {Object.values(hsStatus).filter(s => s === "done").length} companies pushed to HubSpot
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: 28, flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: T.green, opacity: .7, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 3 }}>Scanned</div>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: T.text }}>{signals.length}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: T.green, opacity: .7, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 3 }}>Qualified</div>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: T.text }}>{qualifiedList.length}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: T.green, opacity: .7, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 3 }}>Outreach ready</div>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: T.text }}>{final.length}</div>
+                  </div>
+                  {final.reduce((s, e) => s + (e.roi?.savings || 0), 0) > 0 && (
+                    <div>
+                      <div style={{ fontSize: 10, fontWeight: 600, color: T.green, opacity: .7, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 3 }}>Total addressable savings</div>
+                      <div style={{ fontSize: 24, fontWeight: 800, color: T.green }}>${Math.round(final.reduce((s, e) => s + (e.roi?.savings || 0), 0) / 1000)}K/yr</div>
+                    </div>
+                  )}
                 </div>
               </div>
+
               <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
                 <button onClick={() => {
                   const esc = (v) => `"${String(v || "").replace(/"/g, '""')}"`;
                   const rows = [["Company", "Industry", "Employees", "ICP Score", "DM Name", "DM Title", "DM Email", "DM LinkedIn", "Savings", "Savings %", "Email Subject", "Email Body", "LinkedIn Note", "LinkedIn Followup", "Post"].join(",")];
-                  final.forEach(f => rows.push([esc(f.company.name), esc(f.company.industry || f.signal?.industry || ""), esc(f.company.employees),
+                  final.forEach(f => rows.push([
+                    esc(f.company.name), esc(f.company.industry || f.signal?.industry || ""), esc(f.company.employees),
                     f.company.total_score || "", esc(f.dm.name), esc(f.dm.title), esc(f.dm.email_guess || ""), esc(f.dm.linkedin_url || ""),
                     f.roi?.savings || "", f.roi?.pct || "", esc(f.outreach?.email?.subject || ""), esc(f.outreach?.email?.body || ""),
                     esc(f.outreach?.linkedin?.note || ""), esc(f.outreach?.linkedin?.followup || ""), esc(f.outreach?.post || "")
                   ].join(",")));
                   const blob = new Blob(["\uFEFF" + rows.join("\n")], { type: "text/csv" });
-                  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `feather-pipeline-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
-                }} className="btn-ghost" style={{ flex: 1 }}>Export CSV</button>
+                  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+                  a.download = `feather-pipeline-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+                }} className="btn-ghost" style={{ flex: 1, padding: "10px 0" }}>
+                  Export CSV
+                </button>
                 <button onClick={() => {
-                  const text = final.map(f => `## ${f.company.name}\nDM: ${f.dm.name} (${f.dm.title})\nEmail: ${f.dm.email_guess || "N/A"}\nLinkedIn: ${f.dm.linkedin_url || "N/A"}\nSavings: $${Math.round((f.roi?.savings || 0) / 1000)}K/yr\n\n### Email\nSubject: ${f.outreach?.email?.subject || ""}\n${f.outreach?.email?.body || ""}\n\n### LinkedIn Note\n${f.outreach?.linkedin?.note || ""}\n\n### Follow-up\n${f.outreach?.linkedin?.followup || ""}\n\n### Post\n${f.outreach?.post || ""}\n\n---`).join("\n\n");
+                  const text = final.map(f =>
+                    `## ${f.company.name}\nDM: ${f.dm.name} (${f.dm.title})\nEmail: ${f.dm.email_guess || "N/A"}\nLinkedIn: ${f.dm.linkedin_url || "N/A"}\nSavings: $${Math.round((f.roi?.savings || 0) / 1000)}K/yr\n\n### Cold Email\nSubject: ${f.outreach?.email?.subject || ""}\n\n${f.outreach?.email?.body || ""}\n\n### LinkedIn Note\n${f.outreach?.linkedin?.note || ""}\n\n### Follow-up\n${f.outreach?.linkedin?.followup || ""}\n\n### LinkedIn Post\n${f.outreach?.post || ""}\n\n---`
+                  ).join("\n\n");
                   navigator.clipboard.writeText(text);
-                }} className="btn-ghost" style={{ flex: 1 }}>Copy all outreach</button>
+                }} className="btn-ghost" style={{ flex: 1, padding: "10px 0" }}>
+                  Copy all outreach
+                </button>
               </div>
-              <button onClick={() => { resetPipeline(); setPhase("idle"); }} className="btn-ghost" style={{ width: "100%" }}>Run new pipeline</button>
+              <button onClick={() => { resetPipeline(); setPhase("idle"); }} className="btn-ghost" style={{ width: "100%", padding: "10px 0" }}>
+                Run new pipeline
+              </button>
             </div>
           )}
         </div>
 
-        {/* ═══ ACTIVITY LOG ═══ */}
+        {/* ── ACTIVITY LOG ── */}
         {stageIdx >= 0 && (
-          <div style={{ width: 300, flexShrink: 0 }} className="fu">
-            <div style={{ position: "sticky", top: 20 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                <h3 style={{ fontSize: 11, fontWeight: 600, color: T.textDim, textTransform: "uppercase", letterSpacing: ".05em" }}>Activity</h3>
-                <span style={{ fontSize: 10, color: T.textDim }}>
-                  {logs.length} events{tokenCount.input > 0 && ` · ~$${costEst}`}
+          <div style={{ width: 290, flexShrink: 0 }} className="fu">
+            <div style={{ position: "sticky", top: 72 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: T.textDim, textTransform: "uppercase", letterSpacing: ".06em" }}>Activity</span>
+                <span style={{ fontSize: 10, fontFamily: "'JetBrains Mono',monospace", color: T.textDim }}>
+                  {logs.length} events{tokenCount.input > 0 && ` · $${costEst}`}
                 </span>
               </div>
-              <div className="card" style={{ maxHeight: "calc(100vh - 120px)", overflowY: "auto", fontSize: 11 }}>
+              <div className="card" style={{ maxHeight: "calc(100vh - 140px)", overflowY: "auto" }}>
                 {logs.map((l, i) => (
                   <div key={i} className="si" style={{
-                    padding: "5px 10px", borderBottom: `1px solid ${T.bg}`,
-                    background: l.type === "success" ? T.greenDim : l.type === "error" ? T.redDim : l.type === "gate" ? T.orangeDim : l.type === "warn" ? T.orangeDim : "transparent",
-                    opacity: l.type === "dim" ? 0.5 : 1
+                    padding: "6px 12px", borderBottom: `1px solid ${T.bg}`,
+                    background: l.type === "success" ? `${T.green}11` :
+                      l.type === "error" ? `${T.red}11` :
+                      l.type === "gate" ? `${T.orange}11` :
+                      l.type === "warn" ? `${T.orange}0a` : "transparent",
+                    opacity: l.type === "dim" ? 0.45 : 1,
                   }}>
-                    <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
-                      <span style={{ fontSize: 9, color: T.textDim, fontFamily: "'JetBrains Mono',monospace", flexShrink: 0, marginTop: 1 }}>{l.time}</span>
+                    <div style={{ display: "flex", gap: 7, alignItems: "flex-start" }}>
+                      <span style={{ fontSize: 9, color: T.textDim, fontFamily: "'JetBrains Mono',monospace", flexShrink: 0, marginTop: 2, lineHeight: 1.4 }}>{l.time}</span>
                       <div style={{ minWidth: 0 }}>
-                        <span style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", marginRight: 4,
+                        <span style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", marginRight: 5,
                           color: l.type === "success" ? T.green : l.type === "error" ? T.red : l.type === "gate" ? T.orange : l.type === "warn" ? T.orange : T.textDim
                         }}>{l.src}</span>
-                        <span style={{ color: l.type === "error" ? "#fca5a5" : l.type === "gate" ? "#fcd34d" : T.textSecondary, lineHeight: 1.4, display: "inline" }}>{l.msg}</span>
+                        <span style={{ fontSize: 11, color: l.type === "error" ? "#fca5a5" : l.type === "gate" ? "#fcd34d" : T.textSecondary, lineHeight: 1.5 }}>{l.msg}</span>
                       </div>
                     </div>
                   </div>
                 ))}
-                {isRunning && <div style={{ padding: "8px 10px", display: "flex", alignItems: "center", gap: 6 }}>
-                  <div style={{ width: 8, height: 8, border: `2px solid ${T.blue}`, borderTopColor: "transparent", borderRadius: "50%", animation: "spin .8s linear infinite" }} />
-                  <span style={{ fontSize: 11, color: T.textDim }}>
-                    {phase === "scanning" ? "Searching..." : phase === "enriching" ? "Finding contacts..." : "Generating..."}
-                  </span>
-                </div>}
+                {isRunning && (
+                  <div style={{ padding: "10px 12px", display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ width: 8, height: 8, border: `2px solid ${T.blue}`, borderTopColor: "transparent", borderRadius: "50%", animation: "spin .7s linear infinite" }} />
+                    <span style={{ fontSize: 11, color: T.textDim }}>
+                      {phase === "scanning" ? "Searching..." : phase === "enriching" ? "Finding contacts..." : "Generating outreach..."}
+                    </span>
+                  </div>
+                )}
                 <div ref={logEnd} />
               </div>
             </div>
@@ -1006,37 +1456,69 @@ Return JSON:
 /* ═══════════════ ARCHITECTURE ═══════════════ */
 function Arch() {
   return (
-    <div style={{ maxWidth: 640, margin: "0 auto", padding: "48px 24px" }}>
-      <h1 style={{ fontSize: 20, fontWeight: 700, color: T.text, marginBottom: 4 }}>How it works</h1>
-      <p style={{ fontSize: 13, color: T.textMuted, marginBottom: 32 }}>Three phases. Human approval between each. Nothing sends without your sign-off.</p>
+    <div style={{ maxWidth: 660, margin: "0 auto", padding: "48px 24px" }}>
+      <div style={{ marginBottom: 32 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 800, color: T.text, marginBottom: 6 }}>How Feather works</h1>
+        <p style={{ fontSize: 13, color: T.textMuted, lineHeight: 1.7 }}>Three phases. Human approval between each. AI does the research — you make every decision.</p>
+      </div>
 
-      <div style={{ display: "flex", gap: 20, marginBottom: 36, padding: "12px 0", borderTop: `1px solid ${T.border}`, borderBottom: `1px solid ${T.border}` }}>
-        {[["5-10", "signals/run"], ["~30-50%", "pass ICP"], ["~$0.05", "API cost/lead"], ["10-15 min", "your time"]].map(([v, l]) => (
-          <div key={l}><span style={{ fontSize: 16, fontWeight: 700, color: T.text }}>{v}</span><span style={{ fontSize: 11, color: T.textMuted, marginLeft: 6 }}>{l}</span></div>
+      {/* Stats row */}
+      <div style={{ display: "flex", gap: 0, marginBottom: 36, borderRadius: 10, overflow: "hidden", border: `1px solid ${T.border}` }}>
+        {[["5-10", "signals per run"], ["~40%", "ICP pass rate"], ["~$0.05", "per lead"], ["10-15 min", "your time"]].map(([v, l], i, arr) => (
+          <div key={l} style={{ flex: 1, padding: "14px 16px", background: T.surface, borderRight: i < arr.length - 1 ? `1px solid ${T.border}` : "none" }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: T.text, marginBottom: 2 }}>{v}</div>
+            <div style={{ fontSize: 11, color: T.textMuted }}>{l}</div>
+          </div>
         ))}
       </div>
 
+      {/* Steps */}
       {[
-        { n: "1", title: "Discover", time: "~45s", desc: "Uses Claude web search to find companies actively hiring phone agents from public job boards. Scores each against a 6-factor weighted ICP model.", tools: [["Claude web search", T.blue], ["ICP scoring", T.green]] },
-        { n: "2", title: "Enrich", time: "~20s/company", desc: "Uses Claude web search to find the right decision maker — VP Ops, COO, or Director of Contact Center. Validates email format and LinkedIn URL.", tools: [["Claude web search", T.blue], ["Email validation", T.green]] },
-        { n: "3", title: "Activate", time: "~15s/company", desc: "Generates ROI analysis using salary benchmarks vs Feather's $0.07/min pricing. Drafts personalized cold email, LinkedIn messages, and thought leadership post.", tools: [["ROI engine", T.green], ["Copy generation", T.purple]] },
+        {
+          n: "01", title: "Discover", time: "~60s",
+          desc: "Claude web searches job boards (Indeed, LinkedIn, ZipRecruiter) for companies actively hiring phone agents. Returns real postings with company name, location, openings count, and posting date.",
+          tools: [["Claude web search", T.blue], ["6-factor ICP model", T.green]],
+          gate: "You select which companies to enrich"
+        },
+        {
+          n: "02", title: "Enrich", time: "~20s/company",
+          desc: "Finds the right decision maker at each company — VP Ops, COO, Director of Contact Center. Validates email format, checks LinkedIn URL, and flags low-confidence contacts.",
+          tools: [["Claude web search", T.blue], ["Email + LinkedIn validation", T.green]],
+          gate: "You verify contacts before outreach"
+        },
+        {
+          n: "03", title: "Activate", time: "~15s/company",
+          desc: "Builds a real ROI model using actual salary data vs. Feather's $0.07/min pricing. Drafts a cold email, LinkedIn connection note, follow-up message, and thought leadership post — all personalized.",
+          tools: [["ROI calculator", T.green], ["Personalized copy", T.purple]],
+          gate: null
+        },
       ].map((step, idx) => (
-        <div key={step.n}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-            <div style={{ width: 24, height: 24, borderRadius: "50%", background: T.blue, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#fff" }}>{step.n}</div>
-            <span style={{ fontSize: 15, fontWeight: 600, color: T.text }}>{step.title}</span>
-            <span style={{ fontSize: 11, color: T.textDim }}>{step.time}</span>
-          </div>
-          <div style={{ marginLeft: 34, marginBottom: 12 }}>
-            <p style={{ fontSize: 13, color: T.textMuted, marginBottom: 8, lineHeight: 1.5 }}>{step.desc}</p>
-            <div style={{ display: "flex", gap: 10 }}>
-              {step.tools.map(([name, c]) => <span key={name} style={{ fontSize: 11, color: c, fontWeight: 500 }}>{name}</span>)}
+        <div key={step.n} style={{ marginBottom: 28 }}>
+          <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: T.blueDim, border: `1px solid ${T.blue}44`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <span style={{ fontSize: 11, fontWeight: 800, color: T.blue }}>{step.n}</span>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                <span style={{ fontSize: 16, fontWeight: 700, color: T.text }}>{step.title}</span>
+                <span style={{ fontSize: 11, color: T.textDim }}>{step.time}</span>
+              </div>
+              <p style={{ fontSize: 13, color: T.textMuted, lineHeight: 1.7, marginBottom: 8 }}>{step.desc}</p>
+              <div style={{ display: "flex", gap: 12 }}>
+                {step.tools.map(([name, c]) => (
+                  <span key={name} style={{ fontSize: 11, color: c, fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={{ width: 5, height: 5, borderRadius: "50%", background: c, display: "inline-block" }} />{name}
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
-          {idx < 2 && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: 10, margin: "8px 0" }}>
+          {step.gate && (
+            <div style={{ margin: "16px 0 0 50px", display: "flex", alignItems: "center", gap: 8 }}>
               <div style={{ flex: 1, height: 1, background: T.border }} />
-              <span style={{ fontSize: 10, fontWeight: 600, color: T.orange, background: T.orangeDim, padding: "2px 10px", borderRadius: 4 }}>You approve</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: T.orange, background: T.orangeDim, padding: "3px 12px", borderRadius: 20, border: `1px solid ${T.orange}33`, whiteSpace: "nowrap" }}>
+                &#9654; {step.gate}
+              </span>
               <div style={{ flex: 1, height: 1, background: T.border }} />
             </div>
           )}
@@ -1044,48 +1526,59 @@ function Arch() {
       ))}
 
       {/* ICP model */}
-      <div style={{ marginTop: 32, marginBottom: 32 }}>
-        <h2 style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 10 }}>ICP scoring model</h2>
-        <div style={{ borderTop: `1px solid ${T.border}` }}>
-          {[["Phone intensity", "25%", "How many call center roles are open"], ["Industry fit", "20%", "Mortgage, insurance, credit union, lending"],
-            ["AI readiness", "20%", "No existing AI voice vendor detected"], ["Company size", "15%", "200-2,000 employees"],
-            ["Budget signal", "10%", "3+ concurrent hires"], ["Timing urgency", "10%", "Posted within 7 days"]
-          ].map(([name, w, desc]) => (
-            <div key={name} style={{ display: "flex", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${T.border}` }}>
-              <span style={{ width: 120, fontSize: 12, fontWeight: 500, color: T.textSecondary }}>{name}</span>
-              <span style={{ width: 36, fontSize: 12, fontWeight: 600, color: T.blue, textAlign: "right" }}>{w}</span>
-              <span style={{ flex: 1, fontSize: 11, color: T.textDim, marginLeft: 14 }}>{desc}</span>
+      <div style={{ marginTop: 40 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: T.text, marginBottom: 12, textTransform: "uppercase", letterSpacing: ".06em" }}>ICP Scoring Model</div>
+        <div style={{ border: `1px solid ${T.border}`, borderRadius: 10, overflow: "hidden" }}>
+          {[
+            ["Phone intensity", "25%", "How many call center roles are open", T.blue],
+            ["Industry fit", "20%", "Mortgage, insurance, credit union, lending", T.green],
+            ["AI readiness", "20%", "No existing AI voice vendor detected", T.purple],
+            ["Company size", "15%", "200-2,000 employees", T.cyan],
+            ["Budget signal", "10%", "3+ concurrent hires", T.orange],
+            ["Timing urgency", "10%", "Posted within 7 days", T.green],
+          ].map(([name, w, desc, c], i, arr) => (
+            <div key={name} style={{
+              display: "flex", alignItems: "center", padding: "11px 16px",
+              borderBottom: i < arr.length - 1 ? `1px solid ${T.border}` : "none",
+              background: T.surface
+            }}>
+              <div style={{ width: 6, height: 6, borderRadius: "50%", background: c, marginRight: 10, flexShrink: 0 }} />
+              <span style={{ width: 130, fontSize: 12, fontWeight: 600, color: T.textSecondary }}>{name}</span>
+              <span style={{ width: 40, fontSize: 13, fontWeight: 800, color: c }}>{w}</span>
+              <span style={{ flex: 1, fontSize: 11, color: T.textDim, marginLeft: 8 }}>{desc}</span>
             </div>
           ))}
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 11 }}>
-          <span style={{ color: T.green, fontWeight: 600 }}>Qualify: &ge; 6.0 / 10</span>
-          <span style={{ color: T.textDim }}>Auto-reject: AI voice vendor &middot; government &middot; &gt;5K emp &middot; &lt;50 emp</span>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, padding: "0 4px" }}>
+          <span style={{ fontSize: 11, color: T.green, fontWeight: 600 }}>Qualify threshold: 6.0 / 10</span>
+          <span style={{ fontSize: 11, color: T.textDim }}>Auto-reject: AI vendor &middot; gov &middot; &gt;5K emp &middot; &lt;50 emp</span>
         </div>
       </div>
 
-      <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16, fontSize: 12, color: T.textDim, lineHeight: 1.6 }}>
-        Three gates. Zero autopilot. AI does the research. You make the decisions.
+      <div style={{ marginTop: 36, padding: "14px 18px", background: T.surface, borderRadius: 10, border: `1px solid ${T.border}` }}>
+        <div style={{ fontSize: 12, color: T.textMuted, lineHeight: 1.7 }}>
+          <strong style={{ color: T.text }}>Nothing sends automatically.</strong> Every email, LinkedIn message, and HubSpot push requires your explicit action. This tool finds and prepares — you decide what to send.
+        </div>
       </div>
     </div>
   );
 }
 
 /* ═══ SHARED COMPONENTS ═══ */
-function Tag({ children, color = "blue" }) {
-  const c = { blue: [T.blueDim, T.blue], green: [T.greenDim, T.green], red: [T.redDim, T.red] }[color] || [T.blueDim, T.blue];
-  return <span style={{ display: "inline-block", padding: "1px 7px", borderRadius: 4, fontSize: 10, fontWeight: 600, background: c[0], color: c[1] }}>{children}</span>;
-}
-function MetricCard({ l, v, s, c }) {
-  return <div style={{ background: T.bg, borderRadius: 8, padding: "12px 14px", borderLeft: `3px solid ${c}` }}>
-    <div style={{ fontSize: 10, color: T.textDim, marginBottom: 3 }}>{l}</div>
-    <div style={{ fontSize: 18, fontWeight: 700, color: c }}>{v}</div>
-    {s && <div style={{ fontSize: 10, color: T.textDim, marginTop: 2 }}>{s}</div>}
-  </div>;
-}
-function Stat({ l, v }) { return <div><div style={{ fontSize: 10, color: T.green, fontWeight: 500, marginBottom: 1 }}>{l}</div><div style={{ fontSize: 16, fontWeight: 700, color: T.text }}>{v}</div></div>; }
 function CopyBtn({ text, label }) {
-  const [c, setC] = useState(false);
-  return <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(text); setC(true); setTimeout(() => setC(false), 1500); }}
-    className="btn-ghost" style={{ padding: "3px 10px", fontSize: 11 }}>{c ? "Copied" : label || "Copy"}</button>;
+  const [copied, setCopied] = useState(false);
+  return (
+    <button onClick={(e) => {
+      e.stopPropagation();
+      navigator.clipboard.writeText(text || "");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    }} className="btn-ghost" style={{ padding: "5px 12px", fontSize: 11, display: "flex", alignItems: "center", gap: 5 }}>
+      {copied ? (
+        <><svg width="11" height="11" viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke={T.green} strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>Copied</>
+      ) : (
+        <><svg width="11" height="11" viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="13" height="13" rx="2" stroke={T.textSecondary} strokeWidth="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" stroke={T.textSecondary} strokeWidth="2"/></svg>{label || "Copy"}</>
+      )}
+    </button>
+  );
 }
