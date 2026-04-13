@@ -109,8 +109,9 @@ async function callClaude(systemPrompt, userMessage, useWebSearch = false, maxSe
       clearTimeout(timeout);
 
       if (res.status === 429 || res.status === 529) {
-        if (addLog) addLog("RATE", "Rate Limit", `Attempt ${attempt + 1}/3 — waiting 15s...`, "orange");
-        await sleep(15000);
+        const waitSec = 20 + (attempt * 10);  // 20s, 30s, 40s — escalating backoff
+        if (addLog) addLog("RATE", "Rate Limit", `Attempt ${attempt + 1}/3 — waiting ${waitSec}s...`, "orange");
+        await sleep(waitSec * 1000);
         lastError = new Error('Rate limited');
         continue;
       }
@@ -133,9 +134,9 @@ async function callClaude(systemPrompt, userMessage, useWebSearch = false, maxSe
       if (err.name === 'AbortError') {
         if (addLog) addLog("TIME", "Timeout", `Request timed out after ${timeoutMs/1000}s — retrying...`, "orange");
       } else if (attempt < 2) {
-        if (addLog) addLog("ERR", "Error", `${err.message.slice(0, 100)} — retrying 15s`, "red");
+        if (addLog) addLog("ERR", "Error", `${err.message.slice(0, 100)} — retrying ${20 + attempt * 10}s`, "red");
       }
-      if (attempt < 2) await sleep(15000);
+      if (attempt < 2) await sleep((20 + attempt * 10) * 1000);
     }
   }
   throw lastError || new Error('All retries failed');
@@ -451,9 +452,9 @@ function Pipeline({ hs }) {
         const phoneRole = /call center|phone|customer service|collections|loan servicing|inbound|outbound|representative|agent/i.test(r);
         const phoneScore = phoneRole ? (openings >= 5 ? 2 : 1) : 0;
 
-        // 4. AI VOICE READINESS (weight 20%) — penalize if known AI voice vendor detected
+        // 4. AI VOICE READINESS (weight 20%) — only penalize if known AI voice vendor detected
         const hasAiVoice = /vapi|retell|bland|synthflow|twilio flex|five9|genesys cloud|nice cxone/i.test(companyText);
-        const aiScore = hasAiVoice ? 0 : openings >= 3 ? 2 : 1;
+        const aiScore = hasAiVoice ? 0 : 2;
 
         // 5. BUDGET SIGNAL (weight 10%)
         const budgetScore = openings >= 3 ? 2 : 1;
@@ -510,6 +511,8 @@ function Pipeline({ hs }) {
     const picked = qualified.filter(c => c.qualified && approved1.has(c.name));
     try {
       log("MODEL", "Sonnet", "Using Sonnet for contact research — accuracy matters");
+      log("WAIT", "Cooldown", "Waiting 30s to reset rate limits before enrichment...");
+      await countdownWait(30, log, "Pre-enrichment cooldown —");
       const results = [];
       let _enrichIdx = 0;
       for (const co of picked) {
@@ -535,7 +538,7 @@ function Pipeline({ hs }) {
           results.push({ company: co, signal: sig, dm });
           setEnriched([...results]);
           _enrichIdx++;
-          if (_enrichIdx < picked.length) { log("WAIT", "Cooldown", "Waiting 10s to avoid rate limits..."); await delay(10000); }
+          if (_enrichIdx < picked.length) { log("WAIT", "Cooldown", "Waiting 20s between companies to avoid rate limits..."); await countdownWait(20, log, "Between-company cooldown —"); }
         } catch(err) { log("ERR", "Error", `${co.name}: ${err.message} — skipping`, "error"); _enrichIdx++; }
       }
       if (results.length === 0) throw new Error("No contacts found.");
