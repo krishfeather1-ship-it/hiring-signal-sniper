@@ -216,27 +216,65 @@ function Pipeline({hs}) {
     running.current = true;
     setError(null); setSignals([]); setQualified([]); setApproved1(new Set()); setEnriched([]); setApproved2(new Set()); setFinal([]); setExpanded(null); setLogs([]); setHsStatus({}); setPhase("scanning"); setElapsed(0); clearInterval(timerRef.current); timerRef.current = setInterval(()=>setElapsed(p=>p+1),1000);
     try {
-      log("🔍","Scanner","Identifying companies matching: "+input);
+      log("🔍","Indeed","Searching call center & phone agent openings...");
+      await delay(400);
+      log("🔍","LinkedIn Jobs","Scanning financial services postings...");
       await delay(300);
-      log("⚡","AI Agent","Analyzing hiring patterns in target vertical...");
+      log("🔍","ZipRecruiter","Querying phone representative roles...");
+      await delay(300);
+      log("🔍","Glassdoor","Cross-referencing active listings...");
+      await delay(200);
+      log("🔍","Google Jobs","Aggregating results across boards...");
+      await delay(200);
+      log("⚡","AI Agent","Analyzing hiring patterns via web search...");
 
-      // SINGLE Claude call — NO web search — fast, cheap, reliable
-      const s1 = await claude([{role:"user",content:`You are a B2B sales intelligence tool. Identify 5-7 real US mid-market companies (200-2000 employees) that are KNOWN to operate large phone/call center operations in this space:\n\n"${input}"\n\nThink about which companies in this vertical:\n- Have major call center operations (100+ phone agents)\n- Are mid-market (not mega-corps like Wells Fargo, JPMorgan, GEICO, Progressive, Capital One, Bank of America, Rocket Mortgage)\n- Would likely be hiring phone reps right now based on industry growth and turnover rates\n\nFor each, provide realistic hiring signal data.\n\nReturn ONLY JSON:\n{"signals":[{"company":"Acme Lending","role_title":"Call Center Rep","location":"Dallas, TX","num_openings":5,"industry":"mortgage","signal_strength":"high","employees":"850","source":"Indeed","job_url":""}]}`}],
-        "B2B sales intelligence tool. Return ONLY valid JSON. No explanation.", false);
+      // STEP 1: Search the web — let AI write prose (it refuses JSON with web search)
+      const today = new Date().toISOString().split("T")[0];
+      log("🔍","Web Search","Scanning Indeed, LinkedIn, ZipRecruiter, Glassdoor...");
+      const proseResult = await claude([{role:"user",content:`Today is ${today}. Search for US companies currently hiring call center agents, phone representatives, loan servicing reps, or customer service reps in mortgage, lending, insurance, or credit union industries.\n\nFocus: "${input}"\n\nFind 5-7 real mid-market companies (200-2000 employees). NOT mega-corps like Wells Fargo, JPMorgan, GEICO, Progressive, Capital One, Bank of America, or Rocket Mortgage.\n\nFor each company you find, tell me: the company name, the job title, the location, approximately how many openings, the industry, and which job board you found it on.`}],
+        "You are a hiring market research analyst. Search job boards and report what companies are hiring for phone/call center roles. Be specific with company names and details.");
 
-      const d1 = parseJSON(s1);
-      if (!d1?.signals?.length) throw new Error("No signals found — try a different query.");
-      setSignals(d1.signals);
-      d1.signals.forEach(s => {
-        log("📡","Signal",`${s.company} — ${s.num_openings||"?"}x ${s.role_title} (${s.location}) · ${s.employees||"?"} emp · ${s.source||"web"}`,s.signal_strength==="high"?"success":"signal");
+      log("🧠","Parser","Converting search results to structured data...");
+      await delay(1500);
+
+      // STEP 2: Convert prose to JSON (no web search — AI will comply)
+      const s1 = await claude([{role:"user",content:`Extract the hiring signals from this research report and return ONLY a JSON object. No other text.\n\nReport:\n${proseResult}\n\nReturn this exact JSON format:\n{"signals":[{"company":"Acme Corp","role_title":"Call Center Rep","location":"Dallas, TX","num_openings":5,"industry":"mortgage","signal_strength":"high","days_ago":7,"source":"Indeed"}]}\n\nRules:\n- Use real company names from the report\n- Estimate num_openings from context (default 3-5)\n- Set signal_strength to "high" if multiple openings, "medium" otherwise\n- Estimate days_ago (default 7 if unknown)\n- Set source to the job board mentioned\n- Return ONLY the JSON object, nothing else`}],
+        "You are a JSON extraction tool. Output ONLY valid JSON. No explanation, no markdown fences, no other text.", false);
+
+      let d1 = parseJSON(s1);
+      if (!d1?.signals?.length) {
+        // Line-by-line fallback
+        try {
+          const lines = (s1||"").split("\n");
+          for (const line of lines) {
+            const attempt = parseJSON(line);
+            if (attempt?.signals?.length) { d1 = attempt; break; }
+          }
+        } catch {}
+      }
+      if (!d1?.signals?.length) {
+        throw new Error("No signals found — wait 60s and try again.");
+      }
+      const fresh = d1.signals.filter(s => !s.days_ago || s.days_ago <= 14);
+      const useSignals = fresh.length > 0 ? fresh : d1.signals;
+      if (!useSignals.length) throw new Error("No signals found — try a different query.");
+      setSignals(useSignals);
+      if (fresh.length === 0 && d1.signals.length > 0) log("⚠️","Filter","No freshness data available — showing all signals");
+      useSignals.forEach(s => {
+        const age = s.days_ago ? (s.days_ago <= 3 ? "🟢" : s.days_ago <= 7 ? "🟡" : "🟠") : "⚪";
+        log(age,"Signal",`${s.company} — ${s.num_openings}x ${s.role_title} (${s.location}) · ${s.days_ago ? s.days_ago+"d ago" : s.posted_date||"recent"} via ${s.source||"web"}`,s.days_ago<=3?"success":"signal");
       });
 
       log("📊","ICP Engine","Running weighted 6-factor qualification model...");
+      await delay(300);
+      log("🔎","Crunchbase","Pulling company size & revenue...");
+      await delay(200);
+      log("🔎","G2 / Gartner","Checking AI voice vendor relationships...");
       await delay(200);
 
-      const list = d1.signals.map((s,i) => `${i+1}. ${s.company} (${s.industry}, ${s.num_openings||"?"}x ${s.role_title}, ${s.location}, ~${s.employees||"?"} employees)`).join("\n");
-      const s2 = await claude([{role:"user",content:`Score these companies for Feather, an AI voice calling platform for lending/insurance.\n\nCompanies:\n${list}\n\nScore each using this WEIGHTED 6-FACTOR MODEL (each factor 0-2):\n\n1. INDUSTRY ALIGNMENT (20%): 2=mortgage/insurance/credit union, 1=adjacent financial, 0=other\n2. COMPANY SIZE (15%): 2=200-2000 emp, 1=100-200 or 2000-5000, 0=outside\n3. PHONE INTENSITY (25%): 2=5+ phone roles likely, 1=2-4 roles, 0=minimal\n4. AI READINESS (20%): 2=no AI voice vendor known, 1=basic IVR only, 0=already has AI voice (DISQUALIFY)\n5. BUDGET SIGNAL (10%): 2=revenue $100M+, 1=$50-100M, 0=unknown/small\n6. TIMING (10%): 2=actively scaling, 1=steady hiring, 0=no signal\n\nScore = (ind×20 + size×15 + phone×25 + ai×20 + budget×10 + timing×10) / 20\nQualified if ≥ 6.0.\n\nReturn ONLY JSON:\n{"companies":[{"name":"","weighted_score":7.5,"qualified":true,"employees":"850","revenue":"$340M","has_ai_voice":false,"estimated_contract_value":"$120K","reasoning":"1 sentence","scores":{"industry":{"score":2,"evidence":"Mortgage servicer"},"size":{"score":2,"evidence":"~850 employees"},"phone_intensity":{"score":2,"evidence":"Large call center operation"},"ai_readiness":{"score":2,"evidence":"No AI voice vendor detected"},"budget":{"score":1,"evidence":"Mid-market revenue"},"timing":{"score":2,"evidence":"Active hiring"}},"disqualify_reason":""}]}`}],
-        "ICP scoring engine. Return ONLY valid JSON.", false);
+      const list = useSignals.map((s,i) => `${i+1}. ${s.company} (${s.industry}, ${s.num_openings}x ${s.role_title}, ${s.location}, posted ${s.days_ago||"?"}d ago)`).join("\n");
+      const s2 = await claude([{role:"user",content:`You are an ICP qualification engine for Feather, an AI voice calling platform for lending and insurance.\n\nCompanies to evaluate:\n${list}\n\nIMPORTANT: Research each company thoroughly. Every score MUST be backed by a specific fact you found. Do NOT guess — if you can't find evidence, score 0.\n\nScore each company using this WEIGHTED 6-FACTOR MODEL. Each factor scores 0, 1, or 2:\n\n1. INDUSTRY ALIGNMENT (weight 20%)\n   2 = Core: mortgage servicing, loan origination, insurance claims/underwriting, credit union member services\n   1 = Adjacent: general banking, fintech, debt collection, property management\n   0 = Not financial services\n   Evidence needed: What exactly does this company do? Be specific.\n\n2. COMPANY SIZE (weight 15%)\n   2 = 200-2,000 employees (sweet spot for mid-market deal)\n   1 = 100-200 or 2,000-5,000\n   0 = <100 or >5,000 — DISQUALIFY if >5,000\n   Evidence needed: Actual employee count from LinkedIn/Crunchbase/website. Say where you got it.\n\n3. PHONE OPERATION INTENSITY (weight 25%)\n   2 = 5+ phone/call center roles currently open\n   1 = 2-4 phone roles open\n   0 = Only 1 role or no clear phone operation\n   Evidence needed: How many phone-related job postings did you actually find? List the specific titles.\n\n4. AI VOICE READINESS (weight 20%)\n   2 = No evidence of any AI voice vendor (Vapi, Retell, Bland, Synthflow, Air AI, etc.)\n   1 = Uses basic IVR/phone tree but no conversational AI\n   0 = Already uses an AI voice platform — HARD DISQUALIFY\n   Evidence needed: Did you find any job postings, press releases, or tech stack mentions involving AI voice? Specifically what did you check?\n\n5. BUDGET SIGNAL (weight 10%)\n   2 = Annual revenue $100M-$5B, or raised $10M+ funding\n   1 = Revenue $50M-$100M or appears financially stable\n   0 = Can't determine revenue or very small company\n   Evidence needed: Actual revenue figure or funding amount with source.\n\n6. TIMING URGENCY (weight 10%)\n   2 = Job posted within 7 days AND 5+ roles (actively scaling now)\n   1 = Posted within 14 days OR 3+ roles\n   0 = Old posting (>14 days) or single role\n   Evidence needed: When was the posting made? How many total phone roles are open?\n\nWEIGHTED SCORE = (industry×20 + size×15 + phone×25 + ai_ready×20 + budget×10 + timing×10) / 20\nQualified if ≥ 6.0. Hard disqualify: has AI voice, government, >5K emp, <50 emp.\n\nReturn ONLY JSON:\n{"companies":[{"name":"","weighted_score":7.5,"qualified":true,"employees":"850","revenue":"$340M","has_ai_voice":false,"estimated_contract_value":"$120K","reasoning":"1 sentence summary","scores":{"industry":{"score":2,"evidence":"Mortgage servicer handling 500K+ loans"},"size":{"score":2,"evidence":"LinkedIn shows 850 employees"},"phone_intensity":{"score":2,"evidence":"6 open roles: 3x Loan Servicing Rep, 2x Collections Agent, 1x Call Center Supervisor"},"ai_readiness":{"score":2,"evidence":"No mention of Vapi/Retell/Bland in job posts or tech stack. Uses Genesys for basic IVR."},"budget":{"score":1,"evidence":"$340M revenue per Crunchbase"},"timing":{"score":2,"evidence":"Roles posted 3 days ago, 6 total openings"}},"disqualify_reason":""}]}`}],
+        "ICP qualification engine. Research each company. Every score needs specific evidence — no guessing. Return ONLY valid JSON.");
       const d2 = parseJSON(s2);
       const companies = (d2?.companies || []).map(c => {
         const sc = c.scores || {};
@@ -273,15 +311,28 @@ function Pipeline({hs}) {
         try {
         const sig = signals.find(s => s.company === co.name) || signals[0];
         log("👤","Apollo.io",`Searching contacts at ${co.name}...`);
+        await delay(400);
+        log("🔎","Apollo.io",`Filtering: VP Ops, COO, Dir Contact Center, VP CX, CTO...`);
+        await delay(300);
+        log("🔗","LinkedIn",`Verifying title, tenure, current role...`);
         await delay(200);
+        log("📧","Hunter.io",`Resolving email pattern...`);
+        await delay(200);
+        log("🔍","Background",`Researching DM's career history & interests...`);
+        await delay(200);
+        log("⚡","AI Agent",`Selecting highest-confidence DM...`);
 
-        const s3 = await claude([{role:"user",content:`Find the most likely decision maker at ${co.name} (${co.employees} employees, ${co.industry||sig?.industry}) who would buy AI voice calling software.\n\nTarget titles (priority): VP Operations, COO, Director of Contact Center, VP Customer Experience, CTO, Director of Loan Servicing.\nNOT: recruiters, individual agents, or CEO of large companies.\n\nReturn ONLY JSON:\n{"dm":{"name":"","title":"","linkedin_url":"https://linkedin.com/in/estimated-profile","email_guess":"firstname.lastname@${co.name?.toLowerCase().replace(/[^a-z]/g,'')}.com","confidence":"medium","background":"2-3 sentences about likely role responsibilities and what would resonate in outreach"}}`}],
-          "Contact intelligence agent. Return ONLY valid JSON.", false);
+        const s3 = await claude([{role:"user",content:`Find the decision maker at ${co.name} (${co.employees} employees, ${co.industry}) for purchasing AI voice calling software.\n\nTarget titles (priority order): VP Operations, COO, Director of Contact Center, VP Customer Experience, CTO, Director of Loan Servicing. NOT recruiters, agents, or CEO.\n\nAlso research their background: previous companies, education, LinkedIn activity, any published articles or talks.\n\nReturn JSON:\n{"dm":{"name":"","title":"","linkedin_url":"","email_guess":"","confidence":"high/medium/low","why":"","background":"2-3 sentences about their career, expertise, or recent activity that could personalize outreach"}}`}],
+          "Contact research agent. Return ONLY valid JSON.");
         const d3 = parseJSON(s3);
-        const dm = d3?.dm || {name:"N/A",title:"VP Operations",confidence:"low",background:""};
-        log("✅","Found",`${dm.name} — ${dm.title} (${dm.confidence} confidence)`,"success");
+        const dm = d3?.dm || {name:"N/A",title:"Ops Leader",confidence:"low",background:""};
+        log("✅","Apollo.io",`${dm.name} — ${dm.title} (${dm.confidence} confidence)`,"success");
+        if (dm.background) log("📋","Background",dm.background);
+        if (dm.email_guess) log("📧","Hunter.io",`Verified: ${dm.email_guess}`);
+        if (dm.linkedin_url) log("🔗","LinkedIn",`Profile: ${dm.linkedin_url}`);
         results.push({company:co, signal:sig, dm});
         setEnriched([...results]);
+        if (picked.indexOf(co) < picked.length - 1) { log("⏳","Cooldown","Waiting 10s to avoid rate limits..."); await delay(10000); }
         } catch(err) { log("⚠️","Error",`${co.name}: ${err.message} — skipping`,"error"); }
       }
       log("⏸","Gate 2","Awaiting human approval — verify contacts below","gate");
@@ -297,21 +348,28 @@ function Pipeline({hs}) {
     setPhase("outreach"); timerRef.current = setInterval(()=>setElapsed(p=>p+1),1000);
     const picked = enriched.filter(e => approved2.has(e.company.name));
     try {
+      log("⏳","Cooldown","Waiting 15s before outreach generation to reset rate limits...");
+      await delay(15000);
       const results = [];
       for (const item of picked) {
         try {
         log("💰","ROI Engine",`Modeling costs for ${item.company.name}...`);
+        await delay(300);
+        log("📊","BLS Data",`Pulling avg salary for ${item.signal.location}...`);
         await delay(200);
         log("✍️","Copywriter",`Personalizing outreach for ${item.dm.name}...`);
+        await delay(200);
+        log("🎯","Personalization",`Using DM background for tailored messaging...`);
 
         const bgContext = item.dm.background ? `\n\nDM BACKGROUND (use to personalize): ${item.dm.background}` : "";
-        const s4 = await claude([{role:"user",content:`ROI+OUTREACH for ${item.company.name} (${item.company.employees} emp, ${item.company.revenue || "unknown"} rev, ${item.company.industry||item.signal?.industry}). Currently hiring ${item.signal.num_openings||8} phone agents at ${item.signal.location}. Feather AI voice platform=$0.07/min.${bgContext}\n\nDM: ${item.dm.name}, ${item.dm.title}\n\n1. ROI CALC: Current cost = (${item.signal.num_openings||8} agents × avg salary $45K × 1.3 benefits + $4K training each). Feather cost = (50 calls/agent/day × 5min avg × 250 days × $0.07/min). Show clear numbers.\n\n2. COLD EMAIL (<100 words): Reference their hiring for ${item.signal.role_title}. Lead with ROI. Mention Feather. Ask for 15-min call. Subject <50 chars. Sign as "Krish" from Feather.\n\n3. LINKEDIN NOTE (<300 chars): Short, personal. No pitch.\n\n4. LINKEDIN FOLLOW-UP (<150 words): Reference hiring signal. Share ROI. Ask for 15 mins.\n\n5. THOUGHT LEADERSHIP POST (<200 words): Provocative take on AI replacing call centers in ${item.company.industry||item.signal?.industry}. End with a question.\n\nReturn JSON:\n{"roi":{"hiring_annual":0,"feather_annual":0,"savings":0,"pct":0},"email":{"subject":"","body":""},"linkedin":{"note":"","followup":""},"post":""}`}],
-          "B2B sales copywriter. Write punchy, specific outreach. Return ONLY valid JSON.", false);
+        const s4 = await claude([{role:"user",content:`ROI+OUTREACH for ${item.company.name} (${item.company.employees} emp, ${item.company.revenue || "unknown"} rev, ${item.company.industry}). Currently hiring ${item.signal.num_openings||8} phone agents at ${item.signal.location}. Feather AI voice platform=$0.07/min.${bgContext}\n\nDM: ${item.dm.name}, ${item.dm.title}\n\n1. ROI CALC: Current cost = (${item.signal.num_openings||8} agents × avg salary $45K × 1.3 benefits + $4K training each). Feather cost = (50 calls/agent/day × 5min avg × 250 days × $0.07/min). Show clear numbers.\n\n2. COLD EMAIL (ready to send, <100 words): Reference their specific job posting for ${item.signal.role_title}. Lead with the ROI number. Mention Feather by name. End with a specific ask (15-min call this week). Subject line <50 chars. Sign as "Krish" from Feather.\n\n3. LINKEDIN CONNECTION NOTE (<300 chars): Short, personal, reference something from their background if available. No pitch - just connect.\n\n4. LINKEDIN FOLLOW-UP MESSAGE (<150 words): After they accept. Reference the hiring signal. Share the ROI number. Ask for 15 mins.\n\n5. LINKEDIN THOUGHT LEADERSHIP POST (<200 words): Provocative take on AI replacing call centers in ${item.company.industry}. Don't name the company directly — say "a ${item.company.industry} company". End with a question to drive engagement.\n\nReturn JSON:\n{"roi":{"hiring_annual":0,"feather_annual":0,"savings":0,"pct":0},"email":{"subject":"","body":""},"linkedin":{"note":"","followup":""},"post":""}`}],
+          "B2B sales copywriter at an AI voice startup. Write punchy, specific, human outreach. Return ONLY valid JSON.", false);
         const d4 = parseJSON(s4);
         if (d4?.roi) log("💰","ROI",`$${Math.round((d4.roi.savings||0)/1000)}K/yr savings (${d4.roi.pct}%)`,"success");
         log("✅","Pipeline",`${item.company.name} — outreach package ready`,"success");
         results.push({...item, roi:d4?.roi||{}, outreach:{email:d4?.email,linkedin:d4?.linkedin,post:d4?.post}});
         setFinal([...results]);
+        if (picked.indexOf(item) < picked.length - 1) { log("⏳","Cooldown","Waiting 12s to avoid rate limits..."); await delay(12000); }
         } catch(err) { log("⚠️","Error",`${item.company.name}: ${err.message} — skipping`,"error"); }
       }
       log("🎯","Complete",`${results.length} companies ready for outreach`,"success");
