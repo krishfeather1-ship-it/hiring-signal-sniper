@@ -203,7 +203,7 @@ function Pipeline({hs}) {
   const runScan = useCallback(async (input) => {
     if (running.current) return;
     running.current = true;
-    setError(null); setSignals([]); setQualified([]); setApproved1(new Set()); setEnriched([]); setApproved2(new Set()); setFinal([]); setExpanded(null); setLogs([]); setPhase("scanning"); setElapsed(0); clearInterval(timerRef.current); timerRef.current = setInterval(()=>setElapsed(p=>p+1),1000);
+    setError(null); setSignals([]); setQualified([]); setApproved1(new Set()); setEnriched([]); setApproved2(new Set()); setFinal([]); setExpanded(null); setLogs([]); setHsStatus({}); setPhase("scanning"); setElapsed(0); clearInterval(timerRef.current); timerRef.current = setInterval(()=>setElapsed(p=>p+1),1000);
     try {
       log("🔍","Indeed","Searching call center & phone agent openings...");
       await delay(400);
@@ -237,7 +237,7 @@ function Pipeline({hs}) {
       log("🔎","G2 / Gartner","Checking AI voice vendor relationships...");
       await delay(200);
 
-      const list = d1.signals.map((s,i) => `${i+1}. ${s.company} (${s.industry}, ${s.num_openings}x ${s.role_title}, ${s.location}, posted ${s.days_ago||"?"}d ago)`).join("\n");
+      const list = fresh.map((s,i) => `${i+1}. ${s.company} (${s.industry}, ${s.num_openings}x ${s.role_title}, ${s.location}, posted ${s.days_ago||"?"}d ago)`).join("\n");
       const s2 = await claude([{role:"user",content:`You are an ICP qualification engine for Feather, an AI voice calling platform for lending and insurance.\n\nCompanies to evaluate:\n${list}\n\nIMPORTANT: Research each company thoroughly. Every score MUST be backed by a specific fact you found. Do NOT guess — if you can't find evidence, score 0.\n\nScore each company using this WEIGHTED 6-FACTOR MODEL. Each factor scores 0, 1, or 2:\n\n1. INDUSTRY ALIGNMENT (weight 20%)\n   2 = Core: mortgage servicing, loan origination, insurance claims/underwriting, credit union member services\n   1 = Adjacent: general banking, fintech, debt collection, property management\n   0 = Not financial services\n   Evidence needed: What exactly does this company do? Be specific.\n\n2. COMPANY SIZE (weight 15%)\n   2 = 200-2,000 employees (sweet spot for mid-market deal)\n   1 = 100-200 or 2,000-5,000\n   0 = <100 or >5,000 — DISQUALIFY if >5,000\n   Evidence needed: Actual employee count from LinkedIn/Crunchbase/website. Say where you got it.\n\n3. PHONE OPERATION INTENSITY (weight 25%)\n   2 = 5+ phone/call center roles currently open\n   1 = 2-4 phone roles open\n   0 = Only 1 role or no clear phone operation\n   Evidence needed: How many phone-related job postings did you actually find? List the specific titles.\n\n4. AI VOICE READINESS (weight 20%)\n   2 = No evidence of any AI voice vendor (Vapi, Retell, Bland, Synthflow, Air AI, etc.)\n   1 = Uses basic IVR/phone tree but no conversational AI\n   0 = Already uses an AI voice platform — HARD DISQUALIFY\n   Evidence needed: Did you find any job postings, press releases, or tech stack mentions involving AI voice? Specifically what did you check?\n\n5. BUDGET SIGNAL (weight 10%)\n   2 = Annual revenue $100M-$5B, or raised $10M+ funding\n   1 = Revenue $50M-$100M or appears financially stable\n   0 = Can't determine revenue or very small company\n   Evidence needed: Actual revenue figure or funding amount with source.\n\n6. TIMING URGENCY (weight 10%)\n   2 = Job posted within 7 days AND 5+ roles (actively scaling now)\n   1 = Posted within 14 days OR 3+ roles\n   0 = Old posting (>14 days) or single role\n   Evidence needed: When was the posting made? How many total phone roles are open?\n\nWEIGHTED SCORE = (industry×20 + size×15 + phone×25 + ai_ready×20 + budget×10 + timing×10) / 20\nQualified if ≥ 6.0. Hard disqualify: has AI voice, government, >5K emp, <50 emp.\n\nReturn ONLY JSON:\n{"companies":[{"name":"","weighted_score":7.5,"qualified":true,"employees":"850","revenue":"$340M","has_ai_voice":false,"estimated_contract_value":"$120K","reasoning":"1 sentence summary","scores":{"industry":{"score":2,"evidence":"Mortgage servicer handling 500K+ loans"},"size":{"score":2,"evidence":"LinkedIn shows 850 employees"},"phone_intensity":{"score":2,"evidence":"6 open roles: 3x Loan Servicing Rep, 2x Collections Agent, 1x Call Center Supervisor"},"ai_readiness":{"score":2,"evidence":"No mention of Vapi/Retell/Bland in job posts or tech stack. Uses Genesys for basic IVR."},"budget":{"score":1,"evidence":"$340M revenue per Crunchbase"},"timing":{"score":2,"evidence":"Roles posted 3 days ago, 6 total openings"}},"disqualify_reason":""}]}`}],
         "ICP qualification engine. Research each company. Every score needs specific evidence — no guessing. Return ONLY valid JSON.");
       const d2 = parseJSON(s2);
@@ -260,7 +260,7 @@ function Pipeline({hs}) {
       if (!companies.some(c=>c.qualified)) throw new Error("No companies qualified.");
       log("⏸","Gate 1","Awaiting human approval — review qualified companies below","gate");
       setPhase("gate1"); clearInterval(timerRef.current);
-    } catch(e) { setError(e.message); log("🔴","Error",e.message,"error"); setPhase("idle"); }
+    } catch(e) { setError(e.message); log("🔴","Error",e.message,"error"); setPhase("idle"); clearInterval(timerRef.current); }
     finally { running.current = false; }
   }, []);
 
@@ -302,7 +302,7 @@ function Pipeline({hs}) {
       }
       log("⏸","Gate 2","Awaiting human approval — verify contacts below","gate");
       setPhase("gate2"); clearInterval(timerRef.current);
-    } catch(e) { setError(e.message); log("🔴","Error",e.message,"error"); }
+    } catch(e) { setError(e.message); log("🔴","Error",e.message,"error"); clearInterval(timerRef.current); }
     finally { running.current = false; }
   }, [qualified, approved1, signals]);
 
@@ -339,7 +339,7 @@ function Pipeline({hs}) {
       }
       log("🎯","Complete",`${results.length} companies ready for outreach`,"success");
       setPhase("done"); clearInterval(timerRef.current);
-    } catch(e) { setError(e.message); log("🔴","Error",e.message,"error"); }
+    } catch(e) { setError(e.message); log("🔴","Error",e.message,"error"); clearInterval(timerRef.current); }
     finally { running.current = false; }
   }, [enriched, approved2]);
 
@@ -434,8 +434,8 @@ function Pipeline({hs}) {
                   const on = approved1.has(c.name);
                   const sig = signals.find(s=>s.company===c.name);
                   const days = sig?.days_ago;
-                  const freshColor = days<=3?"#059669":days<=7?"#d97706":"#dc2626";
-                  const freshLabel = days? (days<=1?"Today":days+"d ago") : sig?.posted_date||"Recent";
+                  const freshColor = days==null?"#6b7280":days<=3?"#059669":days<=7?"#d97706":"#dc2626";
+                  const freshLabel = days!=null ? (days<=1?"Today":days+"d ago") : sig?.posted_date||"Recent";
                   return (
                     <div key={i} onClick={()=>{const n=new Set(approved1);on?n.delete(c.name):n.add(c.name);setApproved1(n)}}
                       style={{ background:"#fff",border:`2px solid ${on?"#2563eb":"#e5e7eb"}`,borderRadius:10,padding:"14px 16px",cursor:"pointer",transition:"border .15s" }}>
@@ -710,7 +710,7 @@ function Pipeline({hs}) {
                 </div>
               ))}
 
-              <button onClick={()=>{setPhase("idle");setSignals([]);setQualified([]);setEnriched([]);setFinal([]);setLogs([]);setError(null)}}
+              <button onClick={()=>{setPhase("idle");setSignals([]);setQualified([]);setEnriched([]);setFinal([]);setLogs([]);setError(null);setHsStatus({});clearInterval(timerRef.current);setElapsed(0)}}
                 style={{ background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:600,color:"#6b7280",width:"100%",marginTop:8 }}>
                 ↻ Run new pipeline
               </button>
