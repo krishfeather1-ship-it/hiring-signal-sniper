@@ -1,5 +1,5 @@
 const fs = require('fs');
-const code = fs.readFileSync('/home/claude/hiring-sniper-app/src/App.jsx', 'utf8');
+const code = fs.readFileSync(__dirname + '/src/App.jsx', 'utf8');
 
 let pass = 0, fail = 0;
 function test(name, condition, detail) {
