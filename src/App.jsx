@@ -38,6 +38,7 @@ async function hubspot(method, path, body) {
 }
 function parseNum(s) { if (!s) return 0; return parseInt(String(s).replace(/[^0-9]/g,""),10) || 0; }
 function truncate(s, max=500) { return s && s.length > max ? s.slice(0, max) + "..." : s; }
+function ts() { return new Date().toLocaleTimeString("en-US",{hour12:false,hour:"2-digit",minute:"2-digit",second:"2-digit"}); }
 function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 const PRESETS = [
@@ -75,6 +76,7 @@ export default function App() {
           <div style={{ display:"flex",alignItems:"center",gap:8 }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 3L20 7.5V16.5L12 21L4 16.5V7.5L12 3Z" fill="#1a1a2e"/><path d="M8 16c2-5 5-8 9-10-2 3-3 5.5-3.5 8.5" stroke="#fff" strokeWidth="1.5" strokeLinecap="round"/></svg>
             <span style={{ fontSize:15,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase" }}>Feather</span>
+            <span style={{ fontSize:9,color:"#9ca3af",background:"#f3f4f6",padding:"2px 6px",borderRadius:3,fontWeight:500 }}>GTM v1.0</span>
           </div>
           <div style={{ height:20,width:1,background:"#e5e7eb" }}/>
           {[["pipeline","Pipeline"],["architecture","Architecture"]].map(([id,l]) => (
@@ -119,10 +121,12 @@ function Pipeline({hs}) {
   const [hsStatus, setHsStatus] = useState({});
   const [logs, setLogs] = useState([]);
   const running = useRef(false);
+  const [elapsed, setElapsed] = useState(0);
+  const timerRef = useRef(null);
   const logEnd = useRef(null);
 
   const log = useCallback((icon, src, msg, type="info") => {
-    setLogs(p => [...p, {icon,src,msg,type,ts:Date.now()}]);
+    setLogs(p => [...p, {icon,src,msg,type,time:ts()}]);
   }, []);
 
   useEffect(() => { logEnd.current?.scrollIntoView({behavior:"smooth"}); }, [logs]);
@@ -199,7 +203,7 @@ function Pipeline({hs}) {
   const runScan = useCallback(async (input) => {
     if (running.current) return;
     running.current = true;
-    setError(null); setSignals([]); setQualified([]); setApproved1(new Set()); setEnriched([]); setApproved2(new Set()); setFinal([]); setExpanded(null); setLogs([]); setPhase("scanning");
+    setError(null); setSignals([]); setQualified([]); setApproved1(new Set()); setEnriched([]); setApproved2(new Set()); setFinal([]); setExpanded(null); setLogs([]); setPhase("scanning"); setElapsed(0); clearInterval(timerRef.current); timerRef.current = setInterval(()=>setElapsed(p=>p+1),1000);
     try {
       log("🔍","Indeed","Searching call center & phone agent openings...");
       await delay(400);
@@ -255,7 +259,7 @@ function Pipeline({hs}) {
 
       if (!companies.some(c=>c.qualified)) throw new Error("No companies qualified.");
       log("⏸","Gate 1","Awaiting human approval — review qualified companies below","gate");
-      setPhase("gate1");
+      setPhase("gate1"); clearInterval(timerRef.current);
     } catch(e) { setError(e.message); log("🔴","Error",e.message,"error"); setPhase("idle"); }
     finally { running.current = false; }
   }, []);
@@ -264,7 +268,7 @@ function Pipeline({hs}) {
   const runEnrich = useCallback(async () => {
     if (running.current) return;
     running.current = true;
-    setPhase("enriching");
+    setPhase("enriching"); timerRef.current = setInterval(()=>setElapsed(p=>p+1),1000);
     const picked = qualified.filter(c => c.qualified && approved1.has(c.name));
     try {
       const results = [];
@@ -297,7 +301,7 @@ function Pipeline({hs}) {
         } catch(err) { log("⚠️","Error",`${co.name}: ${err.message} — skipping`,"error"); }
       }
       log("⏸","Gate 2","Awaiting human approval — verify contacts below","gate");
-      setPhase("gate2");
+      setPhase("gate2"); clearInterval(timerRef.current);
     } catch(e) { setError(e.message); log("🔴","Error",e.message,"error"); }
     finally { running.current = false; }
   }, [qualified, approved1, signals]);
@@ -306,7 +310,7 @@ function Pipeline({hs}) {
   const runOutreach = useCallback(async () => {
     if (running.current) return;
     running.current = true;
-    setPhase("outreach");
+    setPhase("outreach"); timerRef.current = setInterval(()=>setElapsed(p=>p+1),1000);
     const picked = enriched.filter(e => approved2.has(e.company.name));
     try {
       log("⏳","Cooldown","Waiting 15s before outreach generation to reset rate limits...");
@@ -334,7 +338,7 @@ function Pipeline({hs}) {
         } catch(err) { log("⚠️","Error",`${item.company.name}: ${err.message} — skipping`,"error"); }
       }
       log("🎯","Complete",`${results.length} companies ready for outreach`,"success");
-      setPhase("done");
+      setPhase("done"); clearInterval(timerRef.current);
     } catch(e) { setError(e.message); log("🔴","Error",e.message,"error"); }
     finally { running.current = false; }
   }, [enriched, approved2]);
@@ -379,13 +383,30 @@ function Pipeline({hs}) {
               <div style={{ display:"flex",gap:3,marginBottom:8 }}>
                 {STAGES.map((_,i)=>(<div key={i} style={{ flex:1,height:3,borderRadius:2,background:i<=stageIdx?(phase==="done"?"#10b981":"#2563eb"):"#e5e7eb",transition:"background .3s" }}/>))}
               </div>
-              <div style={{ display:"flex",gap:8,alignItems:"center" }}>
-                {isRunning && <div style={{ width:12,height:12,border:"2px solid #2563eb",borderTopColor:"transparent",borderRadius:"50%",animation:"spin .8s linear infinite" }}/>}
-                {phase==="done" && <span style={{ color:"#10b981" }}>✓</span>}
-                {(phase==="gate1"||phase==="gate2") && <span style={{ color:"#f59e0b",fontSize:14 }}>⏸</span>}
-                <span style={{ fontSize:12,fontWeight:600,color: phase==="done"?"#10b981":(phase==="gate1"||phase==="gate2")?"#f59e0b":"#2563eb" }}>
-                  {phase==="gate1"?"Awaiting your approval — select companies to enrich":phase==="gate2"?"Verify contacts — approve to generate outreach":phase==="done"?"Pipeline complete":STAGES[stageIdx]}
-                </span>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+                  {isRunning && <div style={{ width:12,height:12,border:"2px solid #2563eb",borderTopColor:"transparent",borderRadius:"50%",animation:"spin .8s linear infinite" }}/>}
+                  {phase==="done" && <span style={{ color:"#10b981" }}>✓</span>}
+                  {(phase==="gate1"||phase==="gate2") && <span style={{ color:"#f59e0b",fontSize:14 }}>⏸</span>}
+                  <span style={{ fontSize:12,fontWeight:600,color: phase==="done"?"#10b981":(phase==="gate1"||phase==="gate2")?"#f59e0b":"#2563eb" }}>
+                    {phase==="gate1"?"Awaiting your approval — select companies to enrich":phase==="gate2"?"Verify contacts — approve to generate outreach":phase==="done"?"Pipeline complete":STAGES[stageIdx]}
+                  </span>
+                </div>
+                <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                  <span style={{ fontSize:11,fontFamily:"'JetBrains Mono',monospace",color:"#9ca3af" }}>{Math.floor(elapsed/60)}:{String(elapsed%60).padStart(2,"0")}</span>
+                  <span style={{ fontSize:10,color:"#d1d5db" }}>Stage {Math.min(stageIdx+1,STAGES.length)}/{STAGES.length}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Empty state */}
+          {phase==="idle" && !error && (
+            <div style={{ background:"#fff",border:"1px dashed #e5e7eb",borderRadius:10,padding:"40px 24px",textAlign:"center",marginBottom:16 }}>
+              <div style={{ fontSize:32,marginBottom:8 }}>📡</div>
+              <div style={{ fontSize:14,fontWeight:600,color:"#111827",marginBottom:4 }}>No pipeline running</div>
+              <div style={{ fontSize:12,color:"#9ca3af",maxWidth:400,margin:"0 auto",lineHeight:1.5 }}>
+                Choose a preset above or type a custom query to scan job boards for hiring signals. The pipeline will find companies, qualify them against ICP, find decision makers, and draft personalized outreach.
               </div>
             </div>
           )}
@@ -612,10 +633,32 @@ function Pipeline({hs}) {
             <div className="fu" style={{ marginTop:16 }}>
               {/* Stats */}
               <div style={{ padding:"16px 20px",background:"#f0fdf4",border:"1px solid #86efac",borderRadius:10,marginBottom:16 }}>
-                <div style={{ fontSize:14,fontWeight:700,color:"#059669",marginBottom:10 }}>✓ Pipeline complete</div>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+                  <div style={{ fontSize:14,fontWeight:700,color:"#059669" }}>✓ Pipeline complete</div>
+                  <span style={{ fontSize:11,fontFamily:"'JetBrains Mono',monospace",color:"#059669" }}>{Math.floor(elapsed/60)}m {elapsed%60}s elapsed</span>
+                </div>
                 <div style={{ display:"flex",gap:28,flexWrap:"wrap" }}>
                   <St l="Signals scanned" v={signals.length}/><St l="ICP qualified" v={qualified.filter(c=>c.qualified).length}/><St l="Outreach ready" v={final.length}/><St l="Total addressable savings" v={`$${Math.round(final.reduce((s,e)=>s+(e.roi?.savings||0),0)/1000)}K/yr`}/>
                 </div>
+              </div>
+
+              {/* Export */}
+              <div style={{ display:"flex",gap:8,marginBottom:16 }}>
+                <button onClick={()=>{
+                  const rows = [["Company","Industry","Employees","Revenue","ICP Score","DM Name","DM Title","DM Email","DM LinkedIn","Hiring Cost","Feather Cost","Savings","Savings %","Email Subject","Email Body","LinkedIn Note","LinkedIn Followup","Post"]];
+                  final.forEach(f => rows.push([f.company.name,f.company.industry||f.signal?.industry||"",f.company.employees,f.company.revenue||"",f.company.total_score||"",f.dm.name,f.dm.title,f.dm.email_guess||"",f.dm.linkedin_url||"",f.roi?.hiring_annual||"",f.roi?.feather_annual||"",f.roi?.savings||"",f.roi?.pct||"",f.outreach?.email?.subject||"",`"${(f.outreach?.email?.body||"").replace(/"/g,'""')}"`,`"${(f.outreach?.linkedin?.note||"").replace(/"/g,'""')}"`,`"${(f.outreach?.linkedin?.followup||"").replace(/"/g,'""')}"`,`"${(f.outreach?.post||"").replace(/"/g,'""')}"`]));
+                  const csv = rows.map(r=>r.join(",")).join("\n");
+                  const blob = new Blob([csv],{type:"text/csv"});
+                  const a = document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=`feather-pipeline-${new Date().toISOString().slice(0,10)}.csv`; a.click();
+                }} style={{ flex:1,padding:"8px 16px",borderRadius:8,fontSize:12,fontWeight:600,background:"#fff",border:"1px solid #e5e7eb",color:"#374151" }}>
+                  ↓ Export CSV
+                </button>
+                <button onClick={()=>{
+                  const text = final.map(f=>`## ${f.company.name}\nDM: ${f.dm.name} (${f.dm.title})\nEmail: ${f.dm.email_guess||"N/A"}\nLinkedIn: ${f.dm.linkedin_url||"N/A"}\nSavings: $${Math.round((f.roi?.savings||0)/1000)}K/yr\n\n### Email\nSubject: ${f.outreach?.email?.subject||""}\n${f.outreach?.email?.body||""}\n\n### LinkedIn Note\n${f.outreach?.linkedin?.note||""}\n\n### LinkedIn Follow-up\n${f.outreach?.linkedin?.followup||""}\n\n### Post\n${f.outreach?.post||""}\n\n---`).join("\n\n");
+                  navigator.clipboard.writeText(text);
+                }} style={{ flex:1,padding:"8px 16px",borderRadius:8,fontSize:12,fontWeight:600,background:"#fff",border:"1px solid #e5e7eb",color:"#374151" }}>
+                  📋 Copy all outreach
+                </button>
               </div>
 
               {/* Per-company action cards */}
@@ -679,12 +722,16 @@ function Pipeline({hs}) {
         {stageIdx>=0 && (
           <div style={{ width:320,flexShrink:0 }} className="fu">
             <div style={{ position:"sticky",top:20 }}>
-              <h3 style={{ fontSize:11,fontWeight:600,color:"#6b7280",textTransform:"uppercase",letterSpacing:".05em",marginBottom:8 }}>Activity log</h3>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
+                <h3 style={{ fontSize:11,fontWeight:600,color:"#6b7280",textTransform:"uppercase",letterSpacing:".05em" }}>Activity log</h3>
+                <span style={{ fontSize:10,color:"#d1d5db" }}>{logs.length} events</span>
+              </div>
               <div style={{ background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,maxHeight:"calc(100vh - 120px)",overflowY:"auto",boxShadow:"0 1px 2px rgba(0,0,0,.04)" }}>
                 {logs.map((l,i) => (
                   <div key={i} className="si" style={{ padding:"7px 12px",borderBottom:"1px solid #f9fafb",
                     background:l.type==="success"?"#f0fdf4":l.type==="error"?"#fef2f2":l.type==="gate"?"#fffbeb":l.type==="filtered"?"#fefce8":"transparent" }}>
                     <div style={{ display:"flex",alignItems:"flex-start",gap:7 }}>
+                      <span style={{ fontSize:8,color:"#d1d5db",fontFamily:"'JetBrains Mono',monospace",flexShrink:0,marginTop:2 }}>{l.time}</span>
                       <span style={{ fontSize:11,flexShrink:0,marginTop:1 }}>{l.icon}</span>
                       <div style={{ minWidth:0 }}>
                         <span style={{ fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:".05em",marginRight:5,
