@@ -90,8 +90,11 @@ async function callClaude(systemPrompt, userMessage, useWebSearch = false, maxSe
 
   const cleanKey = _apiKey.replace(/[^\x20-\x7E]/g, '').trim();
   let lastError = null;
+  const maxRetries = 5;
+  // Backoff: 30s, 45s, 60s, 75s, 90s — patient enough for 1-min rate windows
+  const backoff = (n) => 30 + n * 15;
 
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -109,9 +112,9 @@ async function callClaude(systemPrompt, userMessage, useWebSearch = false, maxSe
       clearTimeout(timeout);
 
       if (res.status === 429 || res.status === 529) {
-        const waitSec = 20 + (attempt * 10);  // 20s, 30s, 40s — escalating backoff
-        if (addLog) addLog("RATE", "Rate Limit", `Attempt ${attempt + 1}/3 — waiting ${waitSec}s...`, "orange");
-        await sleep(waitSec * 1000);
+        const waitSec = backoff(attempt);
+        if (addLog) addLog("RATE", "Rate Limit", `Attempt ${attempt + 1}/${maxRetries} — backing off ${waitSec}s...`, "orange");
+        await countdownWait(waitSec, addLog, `Rate limit cooldown —`);
         lastError = new Error('Rate limited');
         continue;
       }
@@ -133,13 +136,13 @@ async function callClaude(systemPrompt, userMessage, useWebSearch = false, maxSe
       lastError = err;
       if (err.name === 'AbortError') {
         if (addLog) addLog("TIME", "Timeout", `Request timed out after ${timeoutMs/1000}s — retrying...`, "orange");
-      } else if (attempt < 2) {
-        if (addLog) addLog("ERR", "Error", `${err.message.slice(0, 100)} — retrying ${20 + attempt * 10}s`, "red");
+      } else if (attempt < maxRetries - 1) {
+        if (addLog) addLog("ERR", "Error", `${err.message.slice(0, 100)} — retrying in ${backoff(attempt)}s`, "red");
       }
-      if (attempt < 2) await sleep((20 + attempt * 10) * 1000);
+      if (attempt < maxRetries - 1) await sleep(backoff(attempt) * 1000);
     }
   }
-  throw lastError || new Error('All retries failed');
+  throw lastError || new Error('Rate limited — wait 60s and try again');
 }
 
 /* ═══ HUBSPOT PROXY ═══ */
@@ -378,9 +381,9 @@ function Pipeline({ hs }) {
       log("SCAN", "Google Jobs", `Searching Google Jobs for aggregated results...`);
 
       const proseResult = await callClaude(
-        `Hiring research agent. Today: ${today}. Use your web_search tool efficiently — combine site: operators in a single search when possible (e.g. "site:indeed.com OR site:linkedin.com/jobs call center agent"). You have 3 searches max, so be strategic:\n- Search 1: site:indeed.com OR site:ziprecruiter.com for call center / phone agent jobs\n- Search 2: site:linkedin.com/jobs OR site:glassdoor.com/Job for professional postings\n- Search 3: General search for any remaining results + employee counts\n\nTarget: mid-market companies (100-5K employees) in mortgage, lending, insurance, credit unions actively hiring call center/phone agents. For each company: name, industry, EMPLOYEE COUNT (important — look it up), HQ location, job titles, openings count, which job board you found it on, posting date, URL. Prioritize last 14 days. NOT mega-corps (Wells Fargo, JPMorgan, Capital One, GEICO, BofA, Rocket Mortgage).`,
-        `Search for: ${input}. Find 5-8 real companies with active job postings. Write a prose report — no JSON. For each company, include the employee count if you can find it.`,
-        true, 3
+        `Hiring research agent. Today: ${today}. You have exactly 2 web searches — be strategic:\n- Search 1: "${input}" site:indeed.com OR site:linkedin.com/jobs OR site:ziprecruiter.com — find active job postings\n- Search 2: "${input}" site:glassdoor.com OR site:google.com/search — cross-reference + get employee counts\n\nTarget: mid-market companies (100-5K employees). For each: company name, industry, employee count, HQ, job titles, openings count, source, date, URL. Last 14 days. NOT mega-corps.`,
+        `Search for: ${input}. Find 5-8 real companies with active job postings. Prose report — no JSON. Include employee count per company.`,
+        true, 2
       );
 
       log("OK", "Scan", `Search complete — parsing results...`, "success");
@@ -652,7 +655,10 @@ function Pipeline({ hs }) {
             </div>
           )}
 
-          {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "12px 16px", marginBottom: 16 }} className="fu"><span style={{ color: "#dc2626", fontSize: 13 }}>{error}</span></div>}
+          {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "14px 16px", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }} className="fu">
+            <span style={{ color: "#dc2626", fontSize: 13 }}>{error}</span>
+            <button onClick={() => { setError(null); runScan(query); }} style={{ background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, padding: "6px 16px", fontSize: 12, fontWeight: 600, flexShrink: 0, marginLeft: 12 }}>Retry</button>
+          </div>}
 
           {/* ═══ GATE 1: Approve qualified companies ═══ */}
           {phase === "gate1" && (
