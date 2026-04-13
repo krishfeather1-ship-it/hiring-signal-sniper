@@ -228,12 +228,22 @@ function Pipeline({hs}) {
       await delay(200);
       log("⚡","AI Agent","Analyzing hiring patterns via web search...");
 
+      // STEP 1: Search the web — let AI write prose (it refuses JSON with web search)
       const today = new Date().toISOString().split("T")[0];
-      const s1 = await claude([{role:"user",content:`Today is ${today}. Search for companies currently hiring call center agents, phone representatives, or loan servicing reps.\n\nFocus: "${input}"\n\nUS companies, 200-2000 employees, in mortgage/lending/insurance/credit unions.\nNOT: Wells Fargo, JPMorgan, GEICO, Progressive, Capital One, Bank of America, Rocket Mortgage.\nPrioritize recent postings but include any active listings.\n\nYou MUST respond with ONLY a JSON object in this exact format — no other text:\n{"signals":[{"company":"Example Corp","role_title":"Call Center Rep","location":"Dallas, TX","num_openings":5,"industry":"mortgage","signal_strength":"high","days_ago":7,"source":"Indeed"}]}`}],
-        "You are a hiring signal detector. Your response must be ONLY a raw JSON object. Do not include any explanation, markdown, or text outside the JSON.");
+      log("🔍","Web Search","Scanning Indeed, LinkedIn, ZipRecruiter, Glassdoor...");
+      const proseResult = await claude([{role:"user",content:`Today is ${today}. Search for US companies currently hiring call center agents, phone representatives, loan servicing reps, or customer service reps in mortgage, lending, insurance, or credit union industries.\n\nFocus: "${input}"\n\nFind 5-7 real mid-market companies (200-2000 employees). NOT mega-corps like Wells Fargo, JPMorgan, GEICO, Progressive, Capital One, Bank of America, or Rocket Mortgage.\n\nFor each company you find, tell me: the company name, the job title, the location, approximately how many openings, the industry, and which job board you found it on.`}],
+        "You are a hiring market research analyst. Search job boards and report what companies are hiring for phone/call center roles. Be specific with company names and details.");
+
+      log("🧠","Parser","Converting search results to structured data...");
+      await delay(1500);
+
+      // STEP 2: Convert prose to JSON (no web search — AI will comply)
+      const s1 = await claude([{role:"user",content:`Extract the hiring signals from this research report and return ONLY a JSON object. No other text.\n\nReport:\n${proseResult}\n\nReturn this exact JSON format:\n{"signals":[{"company":"Acme Corp","role_title":"Call Center Rep","location":"Dallas, TX","num_openings":5,"industry":"mortgage","signal_strength":"high","days_ago":7,"source":"Indeed"}]}\n\nRules:\n- Use real company names from the report\n- Estimate num_openings from context (default 3-5)\n- Set signal_strength to "high" if multiple openings, "medium" otherwise\n- Estimate days_ago (default 7 if unknown)\n- Set source to the job board mentioned\n- Return ONLY the JSON object, nothing else`}],
+        "You are a JSON extraction tool. Output ONLY valid JSON. No explanation, no markdown fences, no other text.", false);
+
       let d1 = parseJSON(s1);
       if (!d1?.signals?.length) {
-        // Try extracting signals from the raw text if web search results wrapped it
+        // Line-by-line fallback
         try {
           const lines = (s1||"").split("\n");
           for (const line of lines) {
@@ -241,13 +251,6 @@ function Pipeline({hs}) {
             if (attempt?.signals?.length) { d1 = attempt; break; }
           }
         } catch {}
-      }
-      if (!d1?.signals?.length) {
-        log("⚠️","Parser","First parse failed — waiting 8s then retrying...");
-        await delay(8000);
-        const s1b = await claude([{role:"user",content:`Find 5 real US companies (200-2000 employees) in mortgage, lending, or insurance that are hiring phone/call center agents right now.\n\nRespond with ONLY this JSON and absolutely nothing else:\n{"signals":[{"company":"","role_title":"","location":"","num_openings":3,"industry":"","signal_strength":"high","days_ago":7,"source":"Indeed"}]}`}],
-          "Respond with ONLY raw JSON. No text, no markdown fences, no explanation.");
-        d1 = parseJSON(s1b);
       }
       if (!d1?.signals?.length) {
         throw new Error("No signals found — wait 60s and try again.");
