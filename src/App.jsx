@@ -715,89 +715,134 @@ function Pipeline({hs}) {
 
 /* ═══════════════ ARCHITECTURE ═══════════════ */
 function Arch() {
-  const steps = [
-    { label:"Data Sources", color:"#2563eb", icon:"🔍", items:["Indeed","LinkedIn Jobs","ZipRecruiter","Glassdoor","Google Jobs"], desc:"Parallel scan across 5 job boards" },
-    { label:"AI Scan Agent", color:"#2563eb", icon:"🤖", items:["Claude + Web Search","Parse hiring signals","Extract company data"], desc:"Identifies companies hiring phone agents" },
-    { label:"ICP Qualification", color:"#7c3aed", icon:"📊", items:["Crunchbase (size/rev)","G2/Gartner (AI vendors)","Weighted 6-factor model","Threshold: ≥ 6.0/10"], desc:"Industry (20%), Size (15%), Phone intensity (25%), AI readiness (20%), Budget (10%), Timing (10%)" },
-  ];
-  const gate1 = { label:"Gate 1: Approve companies", desc:"Review each qualified company. Select which to enrich. Reject the rest." };
-  const steps2 = [
-    { label:"Contact Enrichment", color:"#7c3aed", icon:"👤", items:["Apollo.io (people search)","LinkedIn (verify title)","Hunter.io (email pattern)","AI DM selection"], desc:"Find VP Ops / COO / Dir Contact Center" },
-  ];
-  const gate2 = { label:"Gate 2: Verify contacts", desc:"Confirm each DM's title, tenure, and LinkedIn. Approve or reject." };
-  const steps3 = [
-    { label:"ROI + Outreach", color:"#0891b2", icon:"✍️", items:["BLS salary data","ROI model ($0.07/min)","Cold email draft","LinkedIn DM + post"], desc:"Personalized outreach with concrete savings numbers" },
-  ];
-  const gate3 = { label:"Gate 3: Review outreach", desc:"Read every email, LinkedIn message, and post. Edit if needed. Send manually." };
-  const outputs = [
-    { label:"Outputs", color:"#f97316", icon:"📤", items:["HubSpot (company+contact+deal)","Slack notification","Outreach ready to send"], desc:"One-click push to CRM" },
-  ];
-
-  const GateBar = ({g}) => (
-    <div style={{ background:"#fffbeb",border:"2px solid #fbbf24",borderRadius:10,padding:"14px 18px",marginBottom:16,display:"flex",alignItems:"center",gap:12 }}>
-      <span style={{ fontSize:20 }}>👤</span>
-      <div>
-        <div style={{ fontSize:13,fontWeight:700,color:"#92400e" }}>{g.label}</div>
-        <div style={{ fontSize:11,color:"#b45309" }}>{g.desc}</div>
+  const Phase = ({num,title,color,tools,outputs,time}) => (
+    <div style={{ flex:1,minWidth:0 }}>
+      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:12 }}>
+        <div style={{ width:28,height:28,borderRadius:"50%",background:color,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:"#fff" }}>{num}</div>
+        <div style={{ fontSize:15,fontWeight:700,color:"#111827" }}>{title}</div>
+      </div>
+      <div style={{ background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:16,minHeight:200 }}>
+        <div style={{ fontSize:10,fontWeight:600,color:"#9ca3af",textTransform:"uppercase",letterSpacing:".05em",marginBottom:8 }}>Tools</div>
+        <div style={{ display:"flex",flexDirection:"column",gap:4,marginBottom:14 }}>
+          {tools.map(([name,c])=>(
+            <div key={name} style={{ display:"flex",alignItems:"center",gap:6,padding:"5px 10px",borderRadius:6,background:c+"0a",border:`1px solid ${c}22` }}>
+              <div style={{ width:6,height:6,borderRadius:"50%",background:c,flexShrink:0 }}/>
+              <span style={{ fontSize:11,fontWeight:500,color:c }}>{name}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize:10,fontWeight:600,color:"#9ca3af",textTransform:"uppercase",letterSpacing:".05em",marginBottom:6 }}>Output</div>
+        {outputs.map((o,i)=>(<div key={i} style={{ fontSize:11,color:"#374151",marginBottom:2 }}>→ {o}</div>))}
+        <div style={{ marginTop:10,fontSize:10,color:"#9ca3af" }}>⏱ {time}</div>
       </div>
     </div>
   );
 
-  const StepCard = ({s}) => (
-    <div style={{ background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:"16px 18px",marginBottom:8 }}>
-      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:8 }}>
-        <span style={{ fontSize:16 }}>{s.icon}</span>
-        <span style={{ fontSize:14,fontWeight:600,color:s.color }}>{s.label}</span>
+  const Gate = ({num,title,action}) => (
+    <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"0 4px",flexShrink:0,width:50 }}>
+      <div style={{ width:1,height:20,background:"#fbbf24" }}/>
+      <div style={{ width:40,height:40,borderRadius:"50%",background:"#fffbeb",border:"2px solid #fbbf24",display:"flex",alignItems:"center",justifyContent:"center" }}>
+        <span style={{ fontSize:14 }}>👤</span>
       </div>
-      <div style={{ display:"flex",flexWrap:"wrap",gap:6,marginBottom:8 }}>
-        {s.items.map(n => (
-          <span key={n} style={{ padding:"3px 10px",borderRadius:5,fontSize:10,fontWeight:600,background:s.color+"10",color:s.color,border:`1px solid ${s.color}30` }}>{n}</span>
-        ))}
-      </div>
-      <div style={{ fontSize:11,color:"#6b7280" }}>{s.desc}</div>
+      <div style={{ fontSize:8,fontWeight:700,color:"#92400e",textAlign:"center",lineHeight:1.2 }}>GATE {num}</div>
+      <div style={{ fontSize:7,color:"#b45309",textAlign:"center",lineHeight:1.2,maxWidth:50 }}>{action}</div>
+      <div style={{ width:1,height:20,background:"#fbbf24" }}/>
     </div>
   );
 
   return (
-    <div style={{ maxWidth:800,margin:"0 auto",padding:"40px 24px" }}>
-      <h1 style={{ fontSize:24,fontWeight:700,color:"#111827",marginBottom:6 }}>System architecture</h1>
-      <p style={{ fontSize:13,color:"#6b7280",marginBottom:24 }}>End-to-end pipeline with 3 human approval gates. No outreach is ever sent automatically.</p>
+    <div style={{ maxWidth:960,margin:"0 auto",padding:"40px 24px" }}>
+      <div style={{ marginBottom:28 }}>
+        <h1 style={{ fontSize:24,fontWeight:700,color:"#111827",marginBottom:4 }}>How it works</h1>
+        <p style={{ fontSize:13,color:"#6b7280" }}>Three phases. Three human gates. AI does the research — you make the calls.</p>
+      </div>
 
+      {/* KPIs */}
       <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:28 }}>
-        {[["Signals / day","6-12","#2563eb"],["Pass rate","~40%","#7c3aed"],["Cost / run","~$0.05","#0891b2"],["Human time","45 min/day","#f59e0b"]].map(([l,v,c])=>(
-          <div key={l} style={{ background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:"12px 14px",borderLeft:`3px solid ${c}` }}>
+        {[["Signals / day","6-12","#2563eb","Companies found hiring phone agents"],["Qualified","~40%","#7c3aed","Pass the 6-factor ICP scoring"],["Cost / lead","~$0.02","#0891b2","AI research cost per qualified lead"],["Your time","15 min","#f59e0b","Per batch of 5-7 companies"]].map(([l,v,c,d])=>(
+          <div key={l} style={{ background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:"14px 16px" }}>
             <div style={{ fontSize:10,color:"#9ca3af",marginBottom:2 }}>{l}</div>
-            <div style={{ fontSize:20,fontWeight:700,color:c }}>{v}</div>
+            <div style={{ fontSize:22,fontWeight:700,color:c }}>{v}</div>
+            <div style={{ fontSize:9,color:"#d1d5db",marginTop:2 }}>{d}</div>
           </div>
         ))}
       </div>
 
-      {steps.map((s,i) => <StepCard key={i} s={s}/>)}
-      <GateBar g={gate1}/>
-      {steps2.map((s,i) => <StepCard key={i} s={s}/>)}
-      <GateBar g={gate2}/>
-      {steps3.map((s,i) => <StepCard key={i} s={s}/>)}
-      <GateBar g={gate3}/>
-      {outputs.map((s,i) => <StepCard key={i} s={s}/>)}
-
-      <h3 style={{ fontSize:14,fontWeight:600,color:"#111827",marginTop:28,marginBottom:10 }}>HubSpot deal pipeline</h3>
-      <div style={{ display:"flex",flexWrap:"wrap",gap:4,marginBottom:20 }}>
-        {["Signal","Qualifying","⏸ Review","Approved","Finding DM","⏸ Verify","DM OK","Outreach","⏸ Review","Sent","Meeting","Won"].map((s,i)=>(
-          <div key={i} style={{ display:"flex",alignItems:"center",gap:4 }}>
-            <div style={{ padding:"4px 10px",borderRadius:5,fontSize:10,fontWeight:500,
-              background:s.startsWith("⏸")?"#fffbeb":s==="Won"?"#f0fdf4":"#fff",
-              color:s.startsWith("⏸")?"#92400e":s==="Won"?"#059669":"#6b7280",
-              border:`1px solid ${s.startsWith("⏸")?"#fde68a":s==="Won"?"#86efac":"#e5e7eb"}`,
-            }}>{s.replace("⏸ ","")}</div>
-            {i<11 && <span style={{ color:"#e5e7eb",fontSize:10 }}>→</span>}
-          </div>
-        ))}
+      {/* 3-Phase Flow */}
+      <div style={{ display:"flex",alignItems:"stretch",gap:0,marginBottom:28 }}>
+        <Phase num="1" title="Discover" color="#2563eb"
+          tools={[["Indeed","#2164f3"],["LinkedIn Jobs","#0077b5"],["ZipRecruiter","#239846"],["Glassdoor","#0caa41"],["Google Jobs","#ea4335"],["Claude AI","#6366f1"]]}
+          outputs={["Companies hiring phone agents","ICP score with evidence","Posting date + freshness"]}
+          time="~30s automated"/>
+        <Gate num="1" action="Approve companies"/>
+        <Phase num="2" title="Enrich" color="#7c3aed"
+          tools={[["Apollo.io","#7c3aed"],["LinkedIn","#0077b5"],["Hunter.io","#ff7043"],["Crunchbase","#0288d1"]]}
+          outputs={["Decision maker name + title","Verified email address","LinkedIn profile URL","Background research"]}
+          time="~20s per company"/>
+        <Gate num="2" action="Verify contacts"/>
+        <Phase num="3" title="Activate" color="#0891b2"
+          tools={[["ROI Engine","#0891b2"],["BLS Salary Data","#1565c0"],["AI Copywriter","#6366f1"],["HubSpot CRM","#f97316"]]}
+          outputs={["ROI calc (hiring vs Feather)","Cold email ready to send","LinkedIn DM + follow-up","Thought leadership post"]}
+          time="~15s per company"/>
       </div>
 
-      <div style={{ background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:"16px 20px" }}>
-        <div style={{ fontSize:13,fontWeight:600,color:"#92400e",marginBottom:4 }}>⏸ Three gates. Zero autopilot.</div>
-        <div style={{ fontSize:12,color:"#92400e",lineHeight:1.6 }}>
-          Every company is reviewed before enrichment. Every contact is verified before outreach is drafted. Every message is read before sending. The AI does the research — humans make the decisions.
+      {/* ICP Model */}
+      <div style={{ background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:20,marginBottom:20 }}>
+        <div style={{ fontSize:14,fontWeight:700,color:"#111827",marginBottom:12 }}>ICP scoring model</div>
+        <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12 }}>
+          {[
+            ["Phone intensity","25%","#2563eb","5+ call center roles open = 2"],
+            ["Industry fit","20%","#7c3aed","Core lending/insurance = 2"],
+            ["AI readiness","20%","#0891b2","No Vapi/Retell/Bland = 2"],
+            ["Company size","15%","#f59e0b","200-2,000 employees = 2"],
+            ["Budget signal","10%","#10b981","Revenue $100M-$5B = 2"],
+            ["Timing urgency","10%","#ef4444","Posted <7d + 5 roles = 2"],
+          ].map(([name,w,c,rule])=>(
+            <div key={name} style={{ padding:"10px 12px",borderRadius:8,borderLeft:`3px solid ${c}`,background:"#f9fafb" }}>
+              <div style={{ display:"flex",justifyContent:"space-between",marginBottom:3 }}>
+                <span style={{ fontSize:12,fontWeight:600,color:"#111827" }}>{name}</span>
+                <span style={{ fontSize:12,fontWeight:700,color:c }}>{w}</span>
+              </div>
+              <div style={{ fontSize:10,color:"#6b7280" }}>{rule}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",background:"#f0fdf4",borderRadius:6,border:"1px solid #86efac" }}>
+          <span style={{ fontSize:12,color:"#059669" }}>Qualify threshold: <strong>≥ 6.0 / 10</strong></span>
+          <span style={{ fontSize:10,color:"#059669" }}>Hard reject: has AI voice · gov · &gt;5K emp</span>
+        </div>
+      </div>
+
+      {/* HubSpot Pipeline */}
+      <div style={{ background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:20,marginBottom:20 }}>
+        <div style={{ fontSize:14,fontWeight:700,color:"#111827",marginBottom:12 }}>HubSpot deal stages</div>
+        <div style={{ display:"flex",flexWrap:"wrap",gap:3,alignItems:"center" }}>
+          {[
+            ["Signal detected","#e5e7eb","#6b7280"],["Qualifying","#e5e7eb","#6b7280"],
+            ["⏸ Pending review","#fde68a","#92400e"],["ICP approved","#86efac","#059669"],
+            ["Finding DM","#e5e7eb","#6b7280"],["⏸ Verify DM","#fde68a","#92400e"],
+            ["Contact OK","#86efac","#059669"],["Gen outreach","#e5e7eb","#6b7280"],
+            ["⏸ Review msgs","#fde68a","#92400e"],["Sent","#bfdbfe","#2563eb"],
+            ["Meeting","#c4b5fd","#7c3aed"],["Won","#86efac","#059669"],
+          ].map(([label,bg,fg],i)=>(
+            <div key={i} style={{ display:"flex",alignItems:"center",gap:3 }}>
+              <div style={{ padding:"4px 10px",borderRadius:4,fontSize:10,fontWeight:600,background:bg,color:fg }}>{label.replace("⏸ ","")}</div>
+              {i<11 && <span style={{ color:"#d1d5db",fontSize:10 }}>›</span>}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Bottom line */}
+      <div style={{ background:"#111827",borderRadius:10,padding:"20px 24px",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+        <div>
+          <div style={{ fontSize:15,fontWeight:700,color:"#fff" }}>Three gates. Zero autopilot.</div>
+          <div style={{ fontSize:12,color:"#6b7280",marginTop:2 }}>AI does the research. Humans make the decisions. Nothing ships without your approval.</div>
+        </div>
+        <div style={{ display:"flex",gap:6 }}>
+          {["Approve","Verify","Review"].map(g=>(
+            <div key={g} style={{ padding:"5px 12px",borderRadius:5,background:"#fbbf2420",border:"1px solid #fbbf2440",fontSize:11,fontWeight:600,color:"#fbbf24" }}>👤 {g}</div>
+          ))}
         </div>
       </div>
     </div>
