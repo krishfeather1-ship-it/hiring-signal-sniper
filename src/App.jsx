@@ -238,32 +238,25 @@ function Pipeline({hs}) {
       await delay(200);
       log("⚡","AI Agent","Analyzing hiring patterns via web search...");
 
-      // STEP 1: Search the web — let AI write prose (it refuses JSON with web search)
+      // STEP 1: Focused single web search → prose (only ~16K tokens, leaves budget for Step 2)
       const today = new Date().toISOString().split("T")[0];
-      log("🔍","Web Search","Scanning Indeed, LinkedIn, ZipRecruiter, Glassdoor...");
-      const proseResult = await claude([{role:"user",content:`Today is ${today}. Search for US companies currently hiring call center agents, phone representatives, loan servicing reps, or customer service reps in mortgage, lending, insurance, or credit union industries.\n\nFocus: "${input}"\n\nFind 5-7 real mid-market companies (200-2000 employees). NOT mega-corps like Wells Fargo, JPMorgan, GEICO, Progressive, Capital One, Bank of America, or Rocket Mortgage.\n\nFor each company you find, tell me: the company name, the job title, the location, approximately how many openings, the industry, and which job board you found it on.`}],
-        "You are a hiring market research analyst. Search job boards and report what companies are hiring for phone/call center roles. Be specific with company names and details.");
+      log("🔍","Web Search","Scanning job boards for hiring signals...");
+      const proseResult = await claude([{role:"user",content:`Do ONE search for: ${input} call center hiring\n\nFrom the results, identify 5 real US mid-market companies (200-2000 employees) actively hiring phone/call center agents. NOT mega-corps (Wells Fargo, JPMorgan, GEICO, Capital One, BofA, Rocket Mortgage).\n\nFor each company list: name, job title, city/state, approx openings, industry, and source.`}],
+        "You are a hiring market research analyst. Search and report which companies are hiring for call center roles. List every company you find with details.");
 
-      log("🧠","Parser","Converting search results to structured data...");
-      await delay(1500);
+      log("🧠","Parser","Converting to structured data...");
+      await delay(500);
 
-      // STEP 2: Convert prose to JSON (no web search — AI will comply)
-      const s1 = await claude([{role:"user",content:`Extract the hiring signals from this research report and return ONLY a JSON object. No other text.\n\nReport:\n${proseResult}\n\nReturn this exact JSON format:\n{"signals":[{"company":"Acme Corp","role_title":"Call Center Rep","location":"Dallas, TX","num_openings":5,"industry":"mortgage","signal_strength":"high","days_ago":7,"source":"Indeed"}]}\n\nRules:\n- Use real company names from the report\n- Estimate num_openings from context (default 3-5)\n- Set signal_strength to "high" if multiple openings, "medium" otherwise\n- Estimate days_ago (default 7 if unknown)\n- Set source to the job board mentioned\n- Return ONLY the JSON object, nothing else`}],
-        "You are a JSON extraction tool. Output ONLY valid JSON. No explanation, no markdown fences, no other text.", false);
+      // STEP 2: Convert prose → JSON (no web search, ~1K tokens, fast)
+      const s1 = await claude([{role:"user",content:`Convert these hiring results to JSON. Output ONLY the JSON object, nothing else:\n\n${proseResult}\n\nFormat: {"signals":[{"company":"","role_title":"","location":"","num_openings":3,"industry":"","signal_strength":"high","days_ago":7,"source":"Indeed"}]}\n\nUse the real company names. Estimate openings (default 3). ONLY output JSON.`}],
+        "Output ONLY valid JSON. No markdown, no explanation.", false);
 
       let d1 = parseJSON(s1);
       if (!d1?.signals?.length) {
-        // Line-by-line fallback
-        try {
-          const lines = (s1||"").split("\n");
-          for (const line of lines) {
-            const attempt = parseJSON(line);
-            if (attempt?.signals?.length) { d1 = attempt; break; }
-          }
-        } catch {}
+        try { const lines = (s1||"").split("\n"); for (const line of lines) { const a = parseJSON(line); if (a?.signals?.length) { d1 = a; break; } } } catch {}
       }
       if (!d1?.signals?.length) {
-        throw new Error("No signals found — wait 60s and try again.");
+        throw new Error("No signals found — try again in 60s.");
       }
       const fresh = d1.signals.filter(s => !s.days_ago || s.days_ago <= 14);
       const useSignals = fresh.length > 0 ? fresh : d1.signals;
