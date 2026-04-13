@@ -674,16 +674,54 @@ function Pipeline({ hs }) {
         try {
           log("ROI", "BLS Data", `Using avg salary benchmarks for ${item.signal?.location || "US"}...`);
           await sleep(200);
-          log("COPY", "Copywriter", `Personalizing outreach for ${item.dm.name} at ${item.company.name}...`);
+          const allDms = item.dms && item.dms.length > 0 ? item.dms : [item.dm];
+          log("COPY", "Copywriter", `Personalizing outreach for ${allDms.length} contact${allDms.length > 1 ? "s" : ""} at ${item.company.name}...`);
 
-          const bgContext = item.dm.background ? `\n\nDM BACKGROUND (use to personalize): ${item.dm.background}` : "";
+          // Research DMs' recent online activity for personalization
+          let dmActivities = {};
+          for (const d of allDms) {
+            if (d.name === "N/A") continue;
+            log("RESEARCH", "LinkedIn", `Researching ${d.name}'s recent posts...`);
+            try {
+              const actResult = await callClaude(
+                `Research this person's recent online activity. Be SPECIFIC — mention exact topics, opinions, or posts.`,
+                `Search: "${d.name}" "${item.company.name}" site:linkedin.com\n\nWhat has ${d.name} (${d.title} at ${item.company.name}) been posting or talking about on LinkedIn recently? List specific topics, opinions, articles they shared. No generic guesses.`,
+                true, 1
+              );
+              if (actResult && actResult.length > 30) {
+                dmActivities[d.name] = actResult;
+                log("OK", "Research", `Found activity for ${d.name}`, "success");
+              }
+            } catch(e) { /* non-critical */ }
+          }
+
+          // Build per-DM context
+          const dmList = allDms.map((d, i) => {
+            const bg = d.background ? `Background: ${d.background}` : "";
+            const act = dmActivities[d.name] ? `Recent LinkedIn activity: ${dmActivities[d.name].slice(0, 300)}` : "";
+            return `DM${i + 1}: ${d.name}, ${d.title}${d.email_guess ? `, ${d.email_guess}` : ""}\n${bg}\n${act}`;
+          }).join("\n\n");
           const s4 = await callClaude(
             `You are a senior B2B sales copywriter selling AI voice infrastructure to lending, mortgage, and financial services companies. You know this industry: CFPB compliance requirements, Reg F call frequency rules for collectors, TCPA consent, high agent turnover (60-80% in collections), licensing costs for loan officers. You lead with their SPECIFIC pain — not generic "AI is cool." Return ONLY valid JSON.`,
-            `CONTEXT:\n- Company: ${item.company.name} (${item.company.employees} emp, ${item.company.revenue || "unknown"} rev, ${item.company.industry || item.signal?.industry || "financial services"})\n- They are actively hiring ${item.signal?.num_openings || 8}x ${item.signal?.role_title || "phone agents"} in ${item.signal?.location || "US"}\n- Decision maker: ${item.dm.name}, ${item.dm.title}${bgContext}\n- Feather = AI voice agents that handle inbound/outbound calls for $0.07/min (no salary, no training, no turnover, 100% CFPB compliant, every call recorded + transcribed)\n\nINDUSTRY CONTEXT (use this):\n- Mortgage loan officer avg salary: $63K + commission. Collections agent: $38K. Customer service rep: $35K.\n- Agent turnover in financial services call centers: 60-80% annually\n- Training cost per agent in regulated lending: $6K-$10K (licensing, compliance training, systems)\n- CFPB requires call recording + audit trails — Feather does this by default\n- Reg F limits collector call attempts to 7/week per consumer — AI tracks this automatically\n\nGENERATE:\n\n1. ROI CALCULATION (use industry-specific numbers):\n   - Current cost: ${item.signal?.num_openings || 8} agents × appropriate salary for "${item.signal?.role_title || "phone agents"}" × 1.35 (benefits/overhead) + training + turnover replacement cost (assume 70% annual turnover)\n   - Feather cost: 50 calls/agent/day × 5 min avg × 250 days × $0.07/min × ${item.signal?.num_openings || 8}\n   - Include hidden costs: compliance violations risk, QA staff, supervisor overhead\n   - Show the delta.\n\n2. COLD EMAIL (<100 words):\n   - Subject: <50 chars, reference their specific job posting or company\n   - Opening: Reference the EXACT role they're hiring for — show you did homework\n   - Middle: One specific pain point for THEIR industry (turnover, compliance, training costs)\n   - ROI number in one sentence\n   - Close: Specific ask — "15 min Thursday or Friday?"\n   - Sign as "Krish" from Feather\n   - Tone: founder-to-operator, not salesy\n\n3. LINKEDIN CONNECTION NOTE (<300 chars):\n   - Reference their background or role in lending/mortgage/financial services\n   - NO pitch. Human reason to connect.\n\n4. LINKEDIN FOLLOW-UP (<150 words, after they accept):\n   - Reference their profile or the connection context\n   - Mention the hiring signal (the specific posting you found)\n   - Drop the savings number casually\n   - Ask for 15 min — reference a similar company in their vertical\n\n5. LINKEDIN POST (<200 words):\n   - Hot take about AI + their specific vertical (mortgage servicing, collections, lending ops)\n   - Use a real stat (e.g., "Average mortgage servicer spends $167/loan on manual outreach")\n   - End with a question that gets comments\n   - Write like a person, not a brand. No hashtags, no emojis.\n\nReturn JSON:\n{"roi":{"hiring_annual":0,"feather_annual":0,"savings":0,"pct":0,"hidden_costs":"turnover + compliance + QA overhead"},"email":{"subject":"","body":""},"linkedin":{"note":"","followup":""},"post":""}`, false);
+            `CONTEXT:\n- Company: ${item.company.name} (${item.company.employees} emp, ${item.company.revenue || "unknown"} rev, ${item.company.industry || item.signal?.industry || "financial services"})\n- Hiring ${item.signal?.num_openings || 8}x ${item.signal?.role_title || "phone agents"} in ${item.signal?.location || "US"}\n- Feather = AI voice agents at $0.07/min (CFPB compliant, every call recorded + transcribed)\n\nDECISION MAKERS AT THIS COMPANY:\n${dmList}\n\nINDUSTRY DATA: Mortgage LO avg $63K. Collections agent $38K. Turnover 60-80%/yr. Training $6K-$10K/head. CFPB audit trails required. Reg F: 7 calls/week max.\n\nGENERATE:\n\n1. ROI (one per company):\n   - Current: ${item.signal?.num_openings || 8} × salary × 1.35 + training + 70% turnover cost\n   - Feather: 50 calls/day × 5 min × 250 days × $0.07/min × ${item.signal?.num_openings || 8}\n\n2. For EACH DM listed above, generate personalized outreach:\n\n   a. COLD EMAIL (<100 words): Subject <50 chars. Reference their job posting. Industry-specific pain. ROI number. Close: "15 min Thursday or Friday?" Sign as "Krish" from Feather.\n\n   b. LINKEDIN CONNECTION NOTE (<300 chars — MOST IMPORTANT):\n   - If you have their LinkedIn activity: reference a SPECIFIC post or topic. "Saw your take on [topic] — [your genuine reaction]"\n   - If you have their background: reference something real (previous company, alma mater, specific experience)\n   - If neither: reference a specific, non-obvious challenge someone in their exact role faces\n   - MUST feel like you genuinely follow them. NO pitch. NO product mention. NO "love to connect." Write as a peer.\n   - GOOD: "Your point about servicing costs outpacing origination revenue was sharp — seeing the same pattern across mid-market lenders."\n   - BAD: "Hi, I run an AI voice company and would love to connect."\n\n   c. LINKEDIN FOLLOW-UP (<150 words, after accept):\n   - Callback to connection note topic\n   - Natural transition to hiring signal\n   - Casual savings number\n   - Soft 15-min ask\n\n3. LINKEDIN POST (<200 words, one per company):\n   - Hot take about AI + their vertical. Real stat. Question ending. No hashtags/emojis.\n\nReturn JSON:\n{"roi":{"hiring_annual":0,"feather_annual":0,"savings":0,"pct":0},"contacts":[{"name":"DM name","email":{"subject":"","body":""},"linkedin":{"note":"","followup":""}}],"post":""}`, false);
           const d4 = parseJSON(s4);
           if (d4?.roi) log("ROI", "ROI", `$${Math.round((d4.roi.savings || 0) / 1000)}K/yr savings (${d4.roi.pct}%)`, "success");
-          log("OK", "Pipeline", `${item.company.name} — outreach package ready`, "success");
-          results.push({ ...item, roi: d4?.roi || {}, outreach: { email: d4?.email, linkedin: d4?.linkedin, post: d4?.post } });
+
+          // Map per-DM outreach back — use contacts array if available, fallback to legacy
+          const perDmOutreach = d4?.contacts || [];
+          const primaryContact = perDmOutreach.find(c => c.name === item.dm.name) || perDmOutreach[0] || {};
+
+          log("OK", "Pipeline", `${item.company.name} — ${perDmOutreach.length || 1} personalized outreach package${perDmOutreach.length > 1 ? "s" : ""} ready`, "success");
+          results.push({
+            ...item,
+            roi: d4?.roi || {},
+            outreach: {
+              email: primaryContact.email || d4?.email,
+              linkedin: primaryContact.linkedin || d4?.linkedin,
+              post: d4?.post
+            },
+            perDmOutreach
+          });
           setFinal([...results]);
           if (idx < picked.length - 1) { log("WAIT", "Cooldown", "Waiting 12s to avoid rate limits..."); await sleep(12000); }
         } catch(err) { log("ERR", "Error", `${item.company.name}: ${err.message} — skipping`, "error"); }
@@ -1166,21 +1204,35 @@ function Pipeline({ hs }) {
                     ))}
                   </div>
 
+                  {/* Per-DM outreach actions */}
+                  <div style={{ display: "grid", gap: 8, marginBottom: 8 }}>
+                    {(item.dms && item.dms.length > 0 ? item.dms : [item.dm]).map((d, di) => {
+                      const dmOut = item.perDmOutreach?.find(p => p.name === d.name) || (di === 0 ? { email: item.outreach?.email, linkedin: item.outreach?.linkedin } : {});
+                      return (
+                        <div key={di} style={{ background: "#f9fafb", borderRadius: 8, padding: "10px 12px", border: "1px solid #f3f4f6" }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", marginBottom: 6 }}>{d.name} — {d.title}</div>
+                          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                            {d.email_guess && dmOut.email && (
+                              <a href={`mailto:${encodeURIComponent(d.email_guess)}?subject=${encodeURIComponent(dmOut.email.subject || "")}&body=${encodeURIComponent(dmOut.email.body || "")}`}
+                                style={{ padding: "5px 12px", borderRadius: 5, fontSize: 10, fontWeight: 600, background: "#2563eb", color: "#fff", textDecoration: "none" }}>
+                                Send email
+                              </a>
+                            )}
+                            {d.linkedin_url && d.linkedin_url.startsWith("http") && (
+                              <a href={d.linkedin_url} target="_blank" rel="noopener"
+                                style={{ padding: "5px 12px", borderRadius: 5, fontSize: 10, fontWeight: 600, background: "#0077b5", color: "#fff", textDecoration: "none" }}>
+                                LinkedIn
+                              </a>
+                            )}
+                            {dmOut.linkedin?.note && <CopyBtn text={dmOut.linkedin.note} label="Copy note" />}
+                            {dmOut.email && <CopyBtn text={`Subject: ${dmOut.email.subject}\n\n${dmOut.email.body}`} label="Copy email" />}
+                            {dmOut.linkedin?.followup && <CopyBtn text={dmOut.linkedin.followup} label="Copy follow-up" />}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {item.dm.email_guess && item.dm.email_guess.includes("@") && item.outreach?.email && (
-                      <a href={`mailto:${encodeURIComponent(item.dm.email_guess || "")}?subject=${encodeURIComponent(item.outreach.email.subject || "")}&body=${encodeURIComponent(item.outreach.email.body || "")}`}
-                        style={{ padding: "7px 16px", borderRadius: 6, fontSize: 12, fontWeight: 600, background: "#2563eb", color: "#fff", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 5 }}>
-                        Send email
-                      </a>
-                    )}
-                    {item.dm.linkedin_url && item.dm.linkedin_url.startsWith("http") && (
-                      <a href={item.dm.linkedin_url} target="_blank" rel="noopener"
-                        style={{ padding: "7px 16px", borderRadius: 6, fontSize: 12, fontWeight: 600, background: "#0077b5", color: "#fff", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 5 }}>
-                        Connect on LinkedIn
-                      </a>
-                    )}
-                    {item.outreach?.linkedin?.note && <CopyBtn text={item.outreach.linkedin.note} label="Copy connection note" />}
-                    {item.outreach?.email && <CopyBtn text={`Subject: ${item.outreach.email.subject}\n\n${item.outreach.email.body}`} label="Copy email" />}
                     {item.outreach?.post && <CopyBtn text={item.outreach.post} label="Copy post" />}
                     {hs && <button onClick={() => pushHS(item)} disabled={hsStatus[item.company.name] === "pushing" || hsStatus[item.company.name] === "done"} style={{
                       padding: "7px 16px", borderRadius: 6, fontSize: 12, fontWeight: 600,
