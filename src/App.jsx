@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 
-let _apiKey = "";
-let _hubspotToken = "";
+let _apiKey = localStorage.getItem("hss_api_key") || "";
+let _hubspotToken = localStorage.getItem("hss_hs_token") || "";
 let _addLog = null;
 
 /* ═══ UTILITIES ═══ */
@@ -157,25 +157,27 @@ async function hubspot(method, path, body) {
 }
 
 const PRESETS = [
-  "Mid-market mortgage lenders hiring call center agents",
-  "Regional insurance carriers hiring claims phone reps",
+  "Mortgage lenders hiring loan officers or call center agents",
+  "Debt collection agencies hiring phone collectors",
   "Credit unions hiring member service reps",
   "Auto lenders hiring loan servicing phone agents",
+  "Insurance carriers hiring claims adjusters or phone reps",
+  "Fintech companies hiring customer support agents",
 ];
 
 /* ═══════════════ APP ROOT ═══════════════ */
 export default function App() {
   const [page, setPage] = useState("pipeline");
   const [showConfig, setShowConfig] = useState(false);
-  const [keys, setKeys] = useState({ a: "", h: "" });
-  const [connected, setConnected] = useState({ a: false, h: false });
+  const [keys, setKeys] = useState({ a: _apiKey, h: _hubspotToken });
+  const [connected, setConnected] = useState({ a: !!_apiKey, h: !!_hubspotToken });
   const [hsVerified, setHsVerified] = useState(false);
 
   const updateKey = (k, v) => {
     const clean = v.replace(/[^\x20-\x7E]/g, "").trim();
     setKeys(p => ({ ...p, [k]: clean }));
-    if (k === "a") { _apiKey = clean; setConnected(p => ({ ...p, a: !!clean })); }
-    if (k === "h") { _hubspotToken = clean; setConnected(p => ({ ...p, h: !!clean })); setHsVerified(false); }
+    if (k === "a") { _apiKey = clean; localStorage.setItem("hss_api_key", clean); setConnected(p => ({ ...p, a: !!clean })); }
+    if (k === "h") { _hubspotToken = clean; localStorage.setItem("hss_hs_token", clean); setConnected(p => ({ ...p, h: !!clean })); setHsVerified(false); }
   };
 
   const [hsVerifyMsg, setHsVerifyMsg] = useState("");
@@ -479,18 +481,19 @@ function Pipeline({ hs }) {
       }
       if (!d1?.signals?.length) throw new Error("No signals found — try again in 60s.");
 
-      const fresh = d1.signals.filter(s => !s.days_ago || s.days_ago <= 14);
-      const list = fresh.map(s => s);
-      const useSignals = list.length > 0 ? list : d1.signals;
+      const fresh = d1.signals.filter(s => !s.days_ago || s.days_ago <= 7);
+      const stale = d1.signals.filter(s => s.days_ago && s.days_ago > 7 && s.days_ago <= 14);
+      const useSignals = fresh.length > 0 ? fresh : stale.length > 0 ? stale : d1.signals;
       if (!useSignals.length) throw new Error("No signals found — try a different query.");
 
       setSignals(useSignals);
-      if (list.length === 0 && d1.signals.length > 0) log("WARN", "Filter", "No freshness data available — showing all signals");
+      if (fresh.length === 0 && stale.length > 0) log("WARN", "Filter", `No postings within 7 days — showing ${stale.length} from last 14 days`);
+      if (fresh.length === 0 && stale.length === 0) log("WARN", "Filter", "No freshness data available — showing all signals");
 
       useSignals.forEach(s => {
         const age = s.days_ago ? (s.days_ago <= 3 ? "NEW" : s.days_ago <= 7 ? "OK" : "OLD") : "UNK";
         const dateStr = s.posted_date ? ` · Posted: ${s.posted_date}` : s.days_ago ? ` · ${s.days_ago}d ago` : "";
-        log(age, "Signal", `${s.company} — ${s.num_openings || "?"}x ${s.role_title} (${s.location || "US"}) via ${s.source || "web"}${dateStr}`);
+        log(age, "Signal", `${s.company} — ${s.num_openings ? s.num_openings + "x " : ""}${s.role_title} (${s.location || "US"}) via ${s.source || "web"}${dateStr}`);
       });
 
       log("ICP", "ICP Engine", "Running weighted 6-factor qualification model...");
@@ -505,8 +508,9 @@ function Pipeline({ hs }) {
         const companyText = `${s.company} ${ind} ${r}`.toLowerCase();
 
         // 1. INDUSTRY ALIGNMENT (weight 20%)
-        const coreInd = /mortgage|lending|loan|insurance|credit union|underwriting/i.test(ind + " " + r);
-        const adjInd = /bank|fintech|financial|collection|servic/i.test(ind + " " + r);
+        const indText = ind + " " + r;
+        const coreInd = /mortgage|lending|loan|debt collect|credit union|underwriting|servicing/i.test(indText);
+        const adjInd = /bank|fintech|financial|insurance|collection|title company|escrow/i.test(indText);
         const industryScore = coreInd ? 2 : adjInd ? 1 : 0;
 
         // 2. COMPANY SIZE (weight 15%) — score from employee data if available
@@ -518,11 +522,11 @@ function Pipeline({ hs }) {
           : 0;                            // <50 or >5K — kill criteria
 
         // 3. PHONE OPERATION intensity (weight 25%)
-        const phoneRole = /call center|phone|customer service|collections|loan servicing|inbound|outbound|representative|agent/i.test(r);
+        const phoneRole = /call center|phone|customer service|collections|loan servicing|loan officer|mortgage processor|inbound|outbound|representative|agent|collector|claims|adjuster|member service/i.test(r);
         const phoneScore = phoneRole ? (openings >= 5 ? 2 : 1) : 0;
 
         // 4. AI VOICE READINESS (weight 20%) — only penalize if known AI voice vendor detected
-        const hasAiVoice = /vapi|retell|bland|synthflow|twilio flex|five9|genesys cloud|nice cxone/i.test(companyText);
+        const hasAiVoice = /vapi|retell|bland|synthflow|twilio flex|five9|genesys cloud|nice cxone|livevox|skit\.ai|replicant|parloa/i.test(companyText);
         const aiScore = hasAiVoice ? 0 : 2;
 
         // 5. BUDGET SIGNAL (weight 10%)
@@ -545,7 +549,7 @@ function Pipeline({ hs }) {
           employees: empLabel,
           revenue: "Est. $50M-500M",
           has_ai_voice: hasAiVoice,
-          estimated_contract_value: "$" + (openings * 15000).toLocaleString() + "/yr",
+          estimated_contract_value: "$" + (openings * (phoneRole && /loan officer|collector|adjuster/i.test(r) ? 22000 : 15000)).toLocaleString() + "/yr",
           reasoning: `${openings}x ${s.role_title || "phone"} roles in ${ind || "financial services"}`,
           scores: { industry: industryScore, size: sizeScore, phone_intensity: phoneScore, ai_readiness: aiScore, budget: budgetScore, timing: timingScore },
           evidence: {
@@ -594,18 +598,54 @@ function Pipeline({ hs }) {
           log("DM", "Hunter.io", `Resolving email pattern @${(co.name || "").toLowerCase().replace(/[^a-z]/g, "")}.com...`);
 
           const coDomain = (co.name || "").toLowerCase().replace(/[^a-z0-9]/g, "") + ".com";
-          const s3 = await callClaude(
-            `You are a B2B sales researcher. You MUST find a REAL person's name — never return "N/A". Use your web search to look up "${co.name}" on apollo.io or linkedin. Return ONLY valid JSON — no markdown, no backticks. Start with {`,
-            `Search: "${co.name}" site:apollo.io OR site:linkedin.com/in/ VP OR Director OR operations OR "contact center"\n\nFind a REAL decision maker at ${co.name} (${co.employees} emp, ${co.industry || sig?.industry || ""}).\n\nRules:\n- You MUST return a real person's full name — NEVER "N/A" or "Unknown"\n- If you can't find the exact person, find ANY senior leader at this company\n- Target titles: VP Operations, VP Customer Experience, Director Contact Center, COO, CTO, CEO\n- For email: use ${coDomain} domain with firstname.lastname@ pattern\n- For linkedin_url: must be a real URL like https://linkedin.com/in/john-doe\n\nReturn JSON:\n{"dm":{"name":"First Last","title":"Title","linkedin_url":"https://linkedin.com/in/...","email_guess":"first.last@${coDomain}","confidence":"high/medium/low","why":"how you found them","background":"1-2 facts"}}`,
-            true, 1
-          );
-          const d3 = parseJSON(s3);
-          const dm = d3?.dm || { name: "N/A", title: "Ops Leader", confidence: "low", background: "" };
-          log("OK", "Apollo.io", `Found: ${dm.name} — ${dm.title} (${dm.confidence} confidence)`, "success");
-          if (dm.background) log("BG", "Background", dm.background);
-          if (dm.email_guess) log("EM", "Hunter.io", `Resolved: ${dm.email_guess}`);
-          if (dm.linkedin_url) log("LI", "LinkedIn", `Profile: ${dm.linkedin_url}`);
-          results.push({ company: co, signal: sig, dm });
+
+          // Step 1: Web search for executives (prose) — then parse to JSON
+          const searches = [
+            `"${co.name}" COO OR CRO OR "Director of Sales" OR "Director of Operations" OR VP site:linkedin.com/in/ OR site:apollo.io`,
+            `"${co.name}" CEO OR COO OR "Vice President" OR founder site:linkedin.com`,
+            `"${co.name}" leadership team executives management`,
+          ];
+
+          let dms = [];
+          for (let si = 0; si < searches.length; si++) {
+            if (si > 0) {
+              log("RETRY", "Apollo.io", `Attempt ${si + 1}/3 — broadening search for ${co.name}...`);
+              await countdownWait(8, log, "Retry cooldown —");
+            }
+
+            // Search step — get prose about executives
+            const prose = await callClaude(
+              `Find executives at "${co.name}". List every person you find with their full name, title, and LinkedIn URL. Be thorough.`,
+              `Search: ${searches[si]}\n\nList all executives/leaders you find at ${co.name}. For each person: full name, title, LinkedIn profile URL. Focus on: COO, CRO, Director of Sales, Director of Operations, VP Ops, VP Sales, CEO.`,
+              true, 1
+            );
+
+            // Parse step — extract structured data from prose
+            if (prose && prose.length > 20) {
+              const parsed = await callClaude(
+                `Extract people from this text into JSON. Return ONLY valid JSON starting with {. No markdown.`,
+                `Extract all people mentioned below into this format. Use ${coDomain} for email guesses (firstname.lastname@${coDomain}).\n\n{"dms":[{"name":"Full Name","title":"Title","linkedin_url":"url or empty","email_guess":"email","confidence":"high/medium/low","why":"source","background":"any facts"}]}\n\nText:\n${prose}`,
+                false
+              );
+              const d3 = parseJSON(parsed);
+              const found = (d3?.dms || (d3?.dm ? [d3.dm] : [])).filter(d => d.name && d.name !== "N/A" && d.name !== "Unknown" && d.name.length > 3);
+              if (found.length > 0) { dms = found.slice(0, 3); break; }
+            }
+          }
+
+          const dm = dms[0] || { name: "N/A", title: "Ops Leader", confidence: "low", background: "" };
+          if (dms.length > 0) {
+            dms.forEach((d, idx) => {
+              const tag = idx === 0 ? "PRIMARY" : "ALT";
+              log("OK", "Apollo.io", `${tag}: ${d.name} — ${d.title} (${d.confidence})`, "success");
+              if (d.email_guess) log("EM", "Hunter.io", `${d.email_guess}`);
+              if (d.linkedin_url && d.linkedin_url.startsWith("http")) log("LI", "LinkedIn", `${d.linkedin_url}`);
+            });
+            if (dm.background) log("BG", "Background", dm.background);
+          } else {
+            log("WARN", "Apollo.io", `Could not find contacts for ${co.name} after 3 attempts`, "orange");
+          }
+          results.push({ company: co, signal: sig, dm, dms });
           setEnriched([...results]);
           _enrichIdx++;
           if (_enrichIdx < picked.length) { log("WAIT", "Cooldown", "Waiting 10s between companies..."); await countdownWait(10, log, "Between-company cooldown —"); }
@@ -638,8 +678,8 @@ function Pipeline({ hs }) {
 
           const bgContext = item.dm.background ? `\n\nDM BACKGROUND (use to personalize): ${item.dm.background}` : "";
           const s4 = await callClaude(
-            `You are a senior B2B sales copywriter who has written 500+ cold emails for SaaS startups selling to mid-market operations leaders. You write like a human — short sentences, no buzzwords, no "I hope this finds you well." You get replies because you lead with the prospect's pain (hiring is slow, expensive, and they still can't fill seats), not your product. Return ONLY valid JSON.`,
-            `CONTEXT:\n- Company: ${item.company.name} (${item.company.employees} emp, ${item.company.revenue || "unknown"} rev, ${item.company.industry || item.signal?.industry || "financial services"})\n- They are actively hiring ${item.signal?.num_openings || 8}x ${item.signal?.role_title || "phone agents"} in ${item.signal?.location || "US"}\n- Decision maker: ${item.dm.name}, ${item.dm.title}${bgContext}\n- Feather = AI voice agents that handle inbound/outbound calls for $0.07/min (no salary, no training, no turnover)\n\nGENERATE:\n\n1. ROI CALCULATION (use real math, not round numbers):\n   - Current annual cost: ${item.signal?.num_openings || 8} agents × $45K avg salary × 1.3 (benefits/overhead) + $4K training per head\n   - Feather annual cost: 50 calls/agent/day × 5 min avg call × 250 working days × $0.07/min × ${item.signal?.num_openings || 8} agents\n   - Show the delta. Be precise.\n\n2. COLD EMAIL (<100 words, ready to paste into Gmail):\n   - Subject line: <50 chars, specific to their company (NOT generic "quick question")\n   - Opening line: Reference the SPECIFIC job posting for ${item.signal?.role_title || "phone agents"} — make it clear you did research\n   - One sentence with the ROI number\n   - Close: Ask for a specific 15-min slot this week, not "let me know if you're interested"\n   - Sign as "Krish" from Feather\n   - Tone: peer-to-peer, not salesy. No "I'd love to" or "would it make sense"\n\n3. LINKEDIN CONNECTION NOTE (<300 chars total):\n   - If DM background is available, reference something SPECIFIC from it (alma mater, previous company, shared industry experience)\n   - If no background, reference their role + the hiring challenge\n   - NO pitch. Just a human reason to connect.\n\n4. LINKEDIN FOLLOW-UP (<150 words, sent after they accept):\n   - Open by referencing something from their profile or the connection note\n   - One line about the hiring signal you spotted\n   - Share the savings number casually ("works out to ~$XK/yr difference")\n   - Ask for 15 min — "happy to share how [similar company] handled it"\n\n5. LINKEDIN POST (<200 words, thought leadership):\n   - Write a hot take about AI in their specific industry (NOT generic "AI is changing everything")\n   - Use a specific data point or anecdote\n   - End with a genuine question that invites comments\n   - No hashtags. No emojis. Write like a person, not a brand.\n\nReturn JSON:\n{"roi":{"hiring_annual":0,"feather_annual":0,"savings":0,"pct":0},"email":{"subject":"","body":""},"linkedin":{"note":"","followup":""},"post":""}`, false);
+            `You are a senior B2B sales copywriter selling AI voice infrastructure to lending, mortgage, and financial services companies. You know this industry: CFPB compliance requirements, Reg F call frequency rules for collectors, TCPA consent, high agent turnover (60-80% in collections), licensing costs for loan officers. You lead with their SPECIFIC pain — not generic "AI is cool." Return ONLY valid JSON.`,
+            `CONTEXT:\n- Company: ${item.company.name} (${item.company.employees} emp, ${item.company.revenue || "unknown"} rev, ${item.company.industry || item.signal?.industry || "financial services"})\n- They are actively hiring ${item.signal?.num_openings || 8}x ${item.signal?.role_title || "phone agents"} in ${item.signal?.location || "US"}\n- Decision maker: ${item.dm.name}, ${item.dm.title}${bgContext}\n- Feather = AI voice agents that handle inbound/outbound calls for $0.07/min (no salary, no training, no turnover, 100% CFPB compliant, every call recorded + transcribed)\n\nINDUSTRY CONTEXT (use this):\n- Mortgage loan officer avg salary: $63K + commission. Collections agent: $38K. Customer service rep: $35K.\n- Agent turnover in financial services call centers: 60-80% annually\n- Training cost per agent in regulated lending: $6K-$10K (licensing, compliance training, systems)\n- CFPB requires call recording + audit trails — Feather does this by default\n- Reg F limits collector call attempts to 7/week per consumer — AI tracks this automatically\n\nGENERATE:\n\n1. ROI CALCULATION (use industry-specific numbers):\n   - Current cost: ${item.signal?.num_openings || 8} agents × appropriate salary for "${item.signal?.role_title || "phone agents"}" × 1.35 (benefits/overhead) + training + turnover replacement cost (assume 70% annual turnover)\n   - Feather cost: 50 calls/agent/day × 5 min avg × 250 days × $0.07/min × ${item.signal?.num_openings || 8}\n   - Include hidden costs: compliance violations risk, QA staff, supervisor overhead\n   - Show the delta.\n\n2. COLD EMAIL (<100 words):\n   - Subject: <50 chars, reference their specific job posting or company\n   - Opening: Reference the EXACT role they're hiring for — show you did homework\n   - Middle: One specific pain point for THEIR industry (turnover, compliance, training costs)\n   - ROI number in one sentence\n   - Close: Specific ask — "15 min Thursday or Friday?"\n   - Sign as "Krish" from Feather\n   - Tone: founder-to-operator, not salesy\n\n3. LINKEDIN CONNECTION NOTE (<300 chars):\n   - Reference their background or role in lending/mortgage/financial services\n   - NO pitch. Human reason to connect.\n\n4. LINKEDIN FOLLOW-UP (<150 words, after they accept):\n   - Reference their profile or the connection context\n   - Mention the hiring signal (the specific posting you found)\n   - Drop the savings number casually\n   - Ask for 15 min — reference a similar company in their vertical\n\n5. LINKEDIN POST (<200 words):\n   - Hot take about AI + their specific vertical (mortgage servicing, collections, lending ops)\n   - Use a real stat (e.g., "Average mortgage servicer spends $167/loan on manual outreach")\n   - End with a question that gets comments\n   - Write like a person, not a brand. No hashtags, no emojis.\n\nReturn JSON:\n{"roi":{"hiring_annual":0,"feather_annual":0,"savings":0,"pct":0,"hidden_costs":"turnover + compliance + QA overhead"},"email":{"subject":"","body":""},"linkedin":{"note":"","followup":""},"post":""}`, false);
           const d4 = parseJSON(s4);
           if (d4?.roi) log("ROI", "ROI", `$${Math.round((d4.roi.savings || 0) / 1000)}K/yr savings (${d4.roi.pct}%)`, "success");
           log("OK", "Pipeline", `${item.company.name} — outreach package ready`, "success");
@@ -787,7 +827,7 @@ function Pipeline({ hs }) {
                           <div style={{ fontSize: 11, color: "#9ca3af", marginLeft: 30 }}>{c.employees} employees · {c.revenue || "unknown rev"} · {c.reasoning}</div>
                           {sig && <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: 30, marginTop: 4 }}>
                             <span style={{ fontSize: 10, fontWeight: 700, color: freshColor, background: freshColor + "18", padding: "1px 6px", borderRadius: 3 }}>{freshLabel}</span>
-                            <span style={{ fontSize: 10, color: "#6b7280" }}>{sig.num_openings || "?"}x {sig.role_title} · {sig.location || "US"}</span>
+                            <span style={{ fontSize: 10, color: "#6b7280" }}>{sig.num_openings ? sig.num_openings + "x " : ""}{sig.role_title} · {sig.location || "US"}</span>
                             {sig.source && <span style={{ fontSize: 9, color: "#6b7280", background: "#f3f4f6", padding: "1px 6px", borderRadius: 3 }}>{sig.source}</span>}
                             {sig.job_url && <a href={sig.job_url} target="_blank" rel="noopener" onClick={e => e.stopPropagation()} style={{ fontSize: 10, color: "#2563eb", textDecoration: "none" }}>View posting ↗</a>}
                           </div>}
@@ -889,16 +929,32 @@ function Pipeline({ hs }) {
                           </div>
                         </div>
                         <div style={{ textAlign: "right" }}>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: "#7c3aed" }}>{e.dm.name}</div>
-                          <div style={{ fontSize: 11, color: "#6b7280" }}>{e.dm.title}</div>
-                          <span style={{ fontSize: 10, fontWeight: 600, color: confColor, background: confColor + "18", padding: "1px 6px", borderRadius: 3 }}>{e.dm.confidence} confidence</span>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: confColor, background: confColor + "18", padding: "1px 6px", borderRadius: 3 }}>{(e.dms && e.dms.length > 0 ? e.dms : [e.dm]).length} contact{(e.dms && e.dms.length > 0 ? e.dms : [e.dm]).length > 1 ? "s" : ""}</span>
                         </div>
                       </div>
-                      <div style={{ marginLeft: 32, marginTop: 8, display: "flex", flexWrap: "wrap", gap: 8 }}>
-                        {e.dm.linkedin_url && e.dm.linkedin_url.startsWith("http") && <a href={e.dm.linkedin_url} target="_blank" rel="noopener" onClick={ev => ev.stopPropagation()} style={{ fontSize: 11, color: "#0077b5", textDecoration: "none", fontWeight: 500, display: "flex", alignItems: "center", gap: 3 }}>LinkedIn ↗</a>}
-                        {e.dm.email_guess && e.dm.email_guess.includes("@") && <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "'JetBrains Mono',monospace" }}>{e.dm.email_guess}</span>}
+                      {/* All DMs for this company */}
+                      <div style={{ marginLeft: 32, marginTop: 10, display: "grid", gap: 8 }}>
+                        {(e.dms && e.dms.length > 0 ? e.dms : [e.dm]).map((d, di) => {
+                          const dConf = d.confidence === "high" ? "#059669" : d.confidence === "medium" ? "#d97706" : "#dc2626";
+                          return (
+                            <div key={di} style={{ background: di === 0 ? "#f5f3ff" : "#f9fafb", borderRadius: 8, padding: "10px 12px", border: di === 0 ? "1px solid #ddd6fe" : "1px solid #e5e7eb" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                                <div>
+                                  <span style={{ fontSize: 13, fontWeight: 700, color: di === 0 ? "#7c3aed" : "#111827" }}>{d.name}</span>
+                                  {di === 0 && <span style={{ fontSize: 9, fontWeight: 700, color: "#7c3aed", background: "#ede9fe", padding: "1px 5px", borderRadius: 3, marginLeft: 6 }}>PRIMARY</span>}
+                                </div>
+                                <span style={{ fontSize: 10, fontWeight: 600, color: dConf, background: dConf + "18", padding: "1px 6px", borderRadius: 3 }}>{d.confidence}</span>
+                              </div>
+                              <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>{d.title}</div>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                                {d.linkedin_url && d.linkedin_url.startsWith("http") && <a href={d.linkedin_url} target="_blank" rel="noopener" onClick={ev => ev.stopPropagation()} style={{ fontSize: 10, color: "#0077b5", textDecoration: "none", fontWeight: 500 }}>LinkedIn ↗</a>}
+                                {d.email_guess && d.email_guess.includes("@") && <span style={{ fontSize: 10, color: "#6b7280", fontFamily: "'JetBrains Mono',monospace" }}>{d.email_guess}</span>}
+                              </div>
+                              {d.background && <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 4, fontStyle: "italic" }}>{truncate(d.background, 150)}</div>}
+                            </div>
+                          );
+                        })}
                       </div>
-                      {e.dm.background && <div style={{ fontSize: 11, color: "#6b7280", marginLeft: 32, marginTop: 6, fontStyle: "italic", lineHeight: 1.5 }}>{truncate(e.dm.background, 200)}</div>}
                       <div style={{ marginLeft: 32, marginTop: 6, fontSize: 11, fontWeight: 700, color: on ? "#7c3aed" : "#d1d5db" }}>{on ? "✓ Approved for outreach" : "Click to approve"}</div>
                     </div>
                   );
@@ -920,7 +976,7 @@ function Pipeline({ hs }) {
                     </div>
                     <div style={{ fontSize: 11, color: "#9ca3af" }}>{item.dm.name} &middot; {item.dm.title}{item.dm.email_guess ? ` · ${item.dm.email_guess}` : ""}</div>
                     <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>
-                      {item.signal?.num_openings || "?"}x {item.signal?.role_title || "agents"} · {item.signal?.source || "web"}{item.signal?.posted_date ? ` · Posted: ${item.signal.posted_date}` : item.signal?.days_ago ? ` · ${item.signal.days_ago}d ago` : ""}
+                      {item.signal?.num_openings ? item.signal.num_openings + "x " : ""}{item.signal?.role_title || "agents"} · {item.signal?.source || "web"}{item.signal?.posted_date ? ` · Posted: ${item.signal.posted_date}` : item.signal?.days_ago ? ` · ${item.signal.days_ago}d ago` : ""}
                     </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1087,7 +1143,7 @@ function Pipeline({ hs }) {
                     <div>
                       <div style={{ fontSize: 15, fontWeight: 700, color: "#111827" }}>{item.company.name}</div>
                       <div style={{ fontSize: 12, color: "#6b7280" }}>{item.company.employees} emp &middot; {item.company.industry || item.signal?.industry || ""} &middot; {item.signal?.location || "US"}</div>
-                      <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>{item.signal?.num_openings || "?"}x {item.signal?.role_title || "agents"} via {item.signal?.source || "web"}{item.signal?.posted_date ? ` · Posted: ${item.signal.posted_date}` : item.signal?.days_ago ? ` · ${item.signal.days_ago}d ago` : ""}</div>
+                      <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>{item.signal?.num_openings ? item.signal.num_openings + "x " : ""}{item.signal?.role_title || "agents"} via {item.signal?.source || "web"}{item.signal?.posted_date ? ` · Posted: ${item.signal.posted_date}` : item.signal?.days_ago ? ` · ${item.signal.days_ago}d ago` : ""}</div>
                     </div>
                     {item.roi?.savings > 0 && <div style={{ textAlign: "right" }}>
                       <div style={{ fontSize: 20, fontWeight: 700, color: "#10b981" }}>${Math.round(item.roi.savings / 1000)}K</div>
@@ -1095,14 +1151,19 @@ function Pipeline({ hs }) {
                     </div>}
                   </div>
 
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, padding: "8px 12px", background: "#f9fafb", borderRadius: 8 }}>
-                    <div style={{ width: 32, height: 32, borderRadius: "50%", background: "#f0f4ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>&#128100;</div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{item.dm.name}</div>
-                      <div style={{ fontSize: 11, color: "#6b7280" }}>{item.dm.title}</div>
-                    </div>
-                    {item.dm.linkedin_url && item.dm.linkedin_url.startsWith("http") && <a href={item.dm.linkedin_url} target="_blank" rel="noopener" style={{ fontSize: 10, color: "#0077b5", textDecoration: "none", fontWeight: 600 }}>LinkedIn &#8599;</a>}
-                    {item.dm.email_guess && item.dm.email_guess.includes("@") && <span style={{ fontSize: 10, color: "#6b7280" }}>{item.dm.email_guess}</span>}
+                  {/* All contacts for this company */}
+                  <div style={{ display: "grid", gap: 6, marginBottom: 12 }}>
+                    {(item.dms && item.dms.length > 0 ? item.dms : [item.dm]).map((d, di) => (
+                      <div key={di} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: di === 0 ? "#f5f3ff" : "#f9fafb", borderRadius: 8, border: di === 0 ? "1px solid #ede9fe" : "1px solid #f3f4f6" }}>
+                        <div style={{ width: 28, height: 28, borderRadius: "50%", background: di === 0 ? "#ede9fe" : "#f0f4ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0 }}>&#128100;</div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{d.name}{di === 0 ? " ★" : ""}</div>
+                          <div style={{ fontSize: 10, color: "#6b7280" }}>{d.title}</div>
+                        </div>
+                        {d.linkedin_url && d.linkedin_url.startsWith("http") && <a href={d.linkedin_url} target="_blank" rel="noopener" style={{ fontSize: 10, color: "#0077b5", textDecoration: "none", fontWeight: 600, flexShrink: 0 }}>LinkedIn &#8599;</a>}
+                        {d.email_guess && d.email_guess.includes("@") && <span style={{ fontSize: 10, color: "#6b7280", flexShrink: 0 }}>{d.email_guess}</span>}
+                      </div>
+                    ))}
                   </div>
 
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
