@@ -54,9 +54,10 @@ export default function App() {
   const [keys, setKeys] = useState({ a: "", h: "" });
   const [connected, setConnected] = useState({ a: false, h: false });
   const updateKey = (k, v) => {
-    setKeys(p => ({ ...p, [k]: v }));
-    if (k === "a") { _apiKey = v; setConnected(p => ({ ...p, a: !!v })); }
-    if (k === "h") { _hubspotToken = v; setConnected(p => ({ ...p, h: !!v })); }
+    const clean = v.replace(/[^\x20-\x7E]/g, "").trim();
+    setKeys(p => ({ ...p, [k]: clean }));
+    if (k === "a") { _apiKey = clean; setConnected(p => ({ ...p, a: !!clean })); }
+    if (k === "h") { _hubspotToken = clean; setConnected(p => ({ ...p, h: !!clean })); }
   };
 
   return (
