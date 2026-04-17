@@ -87,7 +87,7 @@ async function callClaude(systemPrompt, userMessage, useWebSearch = false, maxSe
   let lastError = null;
   const maxRetries = 5;
   // Backoff: 30s, 45s, 60s, 75s, 90s
-  const backoff = (n) => 30 + n * 15;
+  const backoff = (n) => 15 + n * 15;
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     const controller = new AbortController();
@@ -429,52 +429,100 @@ function Pipeline({ hs }) {
     timerRef.current = setInterval(() => setElapsed(p => p + 1), 1000);
 
     try {
-      // ── STEP 1: Web search → prose (Sonnet + 1 combined site-targeted search) ──
       const today = new Date().toLocaleDateString();
-      log("MODEL", "Haiku", "Using Haiku for web search — zero rate limit risk");
-      log("WAIT", "Warmup", "5s warmup to ensure clean rate window...");
-      await countdownWait(5, log, "Warmup —");
-      log("SCAN", "Indeed", `Searching site:indeed.com for: ${input.slice(0, 50)}...`);
-      await sleep(200);
-      log("SCAN", "LinkedIn Jobs", `Searching site:linkedin.com/jobs for postings...`);
-      await sleep(200);
-      log("SCAN", "ZipRecruiter", `Searching site:ziprecruiter.com for openings...`);
-      await sleep(150);
-      log("SCAN", "Glassdoor", `Searching site:glassdoor.com/Job for listings...`);
+      const MAX_SCAN_ATTEMPTS = 3;
+      let d1 = null;
 
-      const proseResult = await callClaude(
-        `Job posting researcher. Today: ${today}. You have 1 web search. Find mid-market companies (100-5000 employees) with active job postings.\n\nFor EACH company write a paragraph with ALL of these details:\n- Company name\n- Industry\n- Approximate employee count (e.g. "~500 employees")\n- HQ location\n- Specific job titles being hired\n- Number of open positions\n- Which job board (Indeed, LinkedIn, ZipRecruiter, Glassdoor)\n- URL if available\n\nSkip Fortune 500 / mega-corps. Write at least 3-4 sentences per company.`,
-        `Search: ${input}\n\nFind 5-8 real companies actively hiring. Write a detailed paragraph per company. Include employee counts. No JSON — prose only.`,
-        true, 1
-      );
+      for (let scanAttempt = 0; scanAttempt < MAX_SCAN_ATTEMPTS; scanAttempt++) {
+        if (scanAttempt > 0) {
+          log("RETRY", "Scan", `Attempt ${scanAttempt + 1}/${MAX_SCAN_ATTEMPTS} — retrying scan with broader search...`, "orange");
+          await countdownWait(10, log, "Retry cooldown —");
+        }
 
-      log("OK", "Scan", `Search complete — parsing results...`, "success");
+        // ── STEP 1: Web search → prose ──
+        log("MODEL", "Haiku", "Using Haiku for web search — zero rate limit risk");
+        if (scanAttempt === 0) {
+          log("WAIT", "Warmup", "5s warmup to ensure clean rate window...");
+          await countdownWait(5, log, "Warmup —");
+        }
+        log("SCAN", "Indeed", `Searching site:indeed.com for: ${input.slice(0, 50)}...`);
+        await sleep(200);
+        log("SCAN", "LinkedIn Jobs", `Searching site:linkedin.com/jobs for postings...`);
+        await sleep(200);
+        log("SCAN", "ZipRecruiter", `Searching site:ziprecruiter.com for openings...`);
+        await sleep(150);
+        log("SCAN", "Glassdoor", `Searching site:glassdoor.com/Job for listings...`);
 
-      // ── 10-second pause between Step 1 and Step 2 ──
-      log("WAIT", "Cooldown", "Waiting 10s before parsing...");
-      await countdownWait(10, log, "Cooldown —");
+        // On retries, broaden the search with date hints and more uses
+        const retryHints = scanAttempt > 0 ? ` 2025 2024 hiring now actively recruiting` : "";
+        const searchUses = scanAttempt === 0 ? 2 : 3;
 
-      // ── STEP 2: Parse prose → JSON (Haiku — fast structured output) ──
-      log("MODEL", "Haiku", "Switching to Haiku for fast JSON parsing");
-      log("PARSE", "Parser", "Converting to structured data...");
-
-      const s1 = await callClaude(
-        "Convert the research report into a JSON array. Return ONLY valid JSON — no markdown, no backticks, no explanation, no preamble. Start your response with { and the key \"signals\".",
-        `Convert this into a JSON object with a "signals" array. Each object: {company, role_title, location, num_openings (number), industry, employees (string — e.g. "500" or "1200", from the report), signal_strength ("high"/"medium"/"low"), days_ago (number or null), source (string — which job board), job_url (string or null), posted_date (string or null)}.\n\nReport:\n${proseResult}`,
-        false
-      );
-
-      let d1 = parseJSON(s1);
-      if (!d1?.signals?.length) {
+        let proseResult = null;
         try {
-          const lines = (s1 || "").split("\n");
-          for (const line of lines) {
-            const a = parseJSON(line);
-            if (a?.signals?.length) { d1 = a; break; }
+          proseResult = await callClaude(
+            `Job posting researcher. Today: ${today}. You have ${searchUses} web searches. Find mid-market companies (100-5000 employees) with active job postings.\n\nFor EACH company write a paragraph with ALL of these details:\n- Company name\n- Industry\n- Approximate employee count (e.g. "~500 employees")\n- HQ location\n- Specific job titles being hired\n- Number of open positions\n- Which job board (Indeed, LinkedIn, ZipRecruiter, Glassdoor)\n- URL if available\n\nSkip Fortune 500 / mega-corps. Write at least 3-4 sentences per company. You MUST find at least 3 companies.`,
+            `Search: ${input}${retryHints}\n\nFind 5-8 real companies actively hiring RIGHT NOW. Write a detailed paragraph per company. Include employee counts. No JSON — prose only. You must find companies — do not give up.`,
+            true, searchUses
+          );
+        } catch (searchErr) {
+          log("WARN", "Scan", `Search failed: ${searchErr.message} — ${scanAttempt < MAX_SCAN_ATTEMPTS - 1 ? "retrying..." : "giving up"}`, "orange");
+          continue;
+        }
+
+        if (!proseResult || proseResult.length < 50) {
+          log("WARN", "Scan", `Search returned insufficient data (${(proseResult || "").length} chars) — ${scanAttempt < MAX_SCAN_ATTEMPTS - 1 ? "retrying..." : "giving up"}`, "orange");
+          continue;
+        }
+
+        log("OK", "Scan", `Search complete — parsing results...`, "success");
+
+        // ── 10-second pause between Step 1 and Step 2 ──
+        log("WAIT", "Cooldown", "Waiting 10s before parsing...");
+        await countdownWait(10, log, "Cooldown —");
+
+        // ── STEP 2: Parse prose → JSON (with retry) ──
+        log("MODEL", "Haiku", "Switching to Haiku for fast JSON parsing");
+        log("PARSE", "Parser", "Converting to structured data...");
+
+        const MAX_PARSE_ATTEMPTS = 2;
+        for (let parseAttempt = 0; parseAttempt < MAX_PARSE_ATTEMPTS; parseAttempt++) {
+          if (parseAttempt > 0) {
+            log("RETRY", "Parser", `Parse retry ${parseAttempt + 1} — using stricter prompt...`, "orange");
+            await sleep(3000);
           }
-        } catch (e) {}
+
+          const parsePrompt = parseAttempt === 0
+            ? `Convert this into a JSON object with a "signals" array. Each object: {company, role_title, location, num_openings (number), industry, employees (string — e.g. "500" or "1200", from the report), signal_strength ("high"/"medium"/"low"), days_ago (number or null), source (string — which job board), job_url (string or null), posted_date (string or null)}.\n\nReport:\n${proseResult}`
+            : `I need you to extract company hiring data from this text. Return ONLY a JSON object like: {"signals":[{"company":"CompanyName","role_title":"Job Title","location":"City, ST","num_openings":3,"industry":"Mortgage Lending","employees":"500","signal_strength":"high","days_ago":7,"source":"Indeed","job_url":null,"posted_date":null}]}\n\nExtract EVERY company mentioned. Here is the text:\n${proseResult}`;
+
+          try {
+            const s1 = await callClaude(
+              "Convert the research report into a JSON object. Return ONLY valid JSON — no markdown, no backticks, no explanation, no preamble. Start your response with { and the key \"signals\". You MUST include at least one signal.",
+              parsePrompt,
+              false
+            );
+
+            d1 = parseJSON(s1);
+            if (!d1?.signals?.length) {
+              try {
+                const lines = (s1 || "").split("\n");
+                for (const line of lines) {
+                  const a = parseJSON(line);
+                  if (a?.signals?.length) { d1 = a; break; }
+                }
+              } catch (e) {}
+            }
+            if (d1?.signals?.length) break;
+          } catch (parseErr) {
+            log("WARN", "Parser", `Parse failed: ${parseErr.message}`, "orange");
+          }
+        }
+
+        if (d1?.signals?.length) break; // Success — exit scan retry loop
+        log("WARN", "Scan", `No signals extracted from search results — ${scanAttempt < MAX_SCAN_ATTEMPTS - 1 ? "retrying entire scan..." : "exhausted all attempts"}`, "orange");
       }
-      if (!d1?.signals?.length) throw new Error("No signals found — try again in 60s.");
+
+      if (!d1?.signals?.length) throw new Error("No signals found after 3 attempts — try a different query or try again in 60s.");
 
       const fresh = d1.signals.filter(s => !s.days_ago || s.days_ago <= 7);
       const stale = d1.signals.filter(s => s.days_ago && s.days_ago > 7 && s.days_ago <= 14);
@@ -579,8 +627,8 @@ function Pipeline({ hs }) {
     const picked = qualified.filter(c => c.qualified && approved1.has(c.name));
     try {
       log("MODEL", "Haiku", "Using Haiku for contact research — fast + reliable");
-      log("WAIT", "Cooldown", "Waiting 15s before enrichment...");
-      await countdownWait(15, log, "Pre-enrichment cooldown —");
+      log("WAIT", "Cooldown", "Waiting 12s before enrichment...");
+      await countdownWait(12, log, "Pre-enrichment cooldown —");
       const results = [];
       let _enrichIdx = 0;
       for (const co of picked) {
@@ -605,18 +653,31 @@ function Pipeline({ hs }) {
           for (let si = 0; si < searches.length; si++) {
             if (si > 0) {
               log("RETRY", "Apollo.io", `Attempt ${si + 1}/3 — broadening search for ${co.name}...`);
-              await countdownWait(8, log, "Retry cooldown —");
+              await countdownWait(10, log, "Retry cooldown —");
             }
 
-            // Search step — get prose about executives
-            const prose = await callClaude(
-              `Find executives at "${co.name}". List every person you find with their full name, title, and LinkedIn URL. Be thorough.`,
-              `Search: ${searches[si]}\n\nList all executives/leaders you find at ${co.name}. For each person: full name, title, LinkedIn profile URL. Focus on: COO, CRO, Director of Sales, Director of Operations, VP Ops, VP Sales, CEO.`,
-              true, 1
-            );
+            // Search step — get prose about executives (with internal retry)
+            let prose = null;
+            for (let searchRetry = 0; searchRetry < 2; searchRetry++) {
+              try {
+                prose = await callClaude(
+                  `Find executives at "${co.name}". List every person you find with their full name, title, and LinkedIn URL. Be thorough.`,
+                  `Search: ${searches[si]}\n\nList all executives/leaders you find at ${co.name}. For each person: full name, title, LinkedIn profile URL. Focus on: COO, CRO, Director of Sales, Director of Operations, VP Ops, VP Sales, CEO.`,
+                  true, 1
+                );
+                break;
+              } catch (searchErr) {
+                if (searchRetry === 0) {
+                  log("WARN", "Apollo.io", `Search hiccup: ${searchErr.message.slice(0, 60)} — retrying after cooldown...`, "orange");
+                  await countdownWait(15, log, "Rate limit recovery —");
+                } else {
+                  log("WARN", "Apollo.io", `Search failed twice — moving to next strategy`, "orange");
+                }
+              }
+            }
 
             // Parse step — extract structured data from prose
-            if (prose && prose.length > 20) {
+            if (prose && prose.length > 40) {
               const parsed = await callClaude(
                 `Extract people from this text into JSON. Return ONLY valid JSON starting with {. No markdown.`,
                 `Extract all people mentioned below into this format. Use ${coDomain} for email guesses (firstname.lastname@${coDomain}).\n\n{"dms":[{"name":"Full Name","title":"Title","linkedin_url":"url or empty","email_guess":"email","confidence":"high/medium/low","why":"source","background":"any facts"}]}\n\nText:\n${prose}`,
@@ -674,8 +735,10 @@ function Pipeline({ hs }) {
 
           // Research DMs' recent online activity for personalization
           let dmActivities = {};
-          for (const d of allDms) {
+          for (let dIdx = 0; dIdx < allDms.length; dIdx++) {
+            const d = allDms[dIdx];
             if (d.name === "N/A") continue;
+            if (dIdx > 0) await sleep(3000); // Small cooldown between DM research calls
             log("RESEARCH", "LinkedIn", `Researching ${d.name}'s recent posts...`);
             try {
               const actResult = await callClaude(
@@ -687,7 +750,10 @@ function Pipeline({ hs }) {
                 dmActivities[d.name] = actResult;
                 log("OK", "Research", `Found activity for ${d.name}`, "success");
               }
-            } catch(e) { /* non-critical */ }
+            } catch(e) {
+              log("WARN", "Research", `Could not find activity for ${d.name} — outreach will use role-based personalization`, "orange");
+              await sleep(5000); // Extra cooldown after an error
+            }
           }
 
           // Build per-DM context
@@ -718,7 +784,7 @@ function Pipeline({ hs }) {
             perDmOutreach
           });
           setFinal([...results]);
-          if (idx < picked.length - 1) { log("WAIT", "Cooldown", "Waiting 12s to avoid rate limits..."); await sleep(12000); }
+          if (idx < picked.length - 1) { log("WAIT", "Cooldown", "Waiting 15s between companies..."); await countdownWait(15, log, "Between-company cooldown —"); }
         } catch(err) { log("ERR", "Error", `${item.company.name}: ${err.message} — skipping`, "error"); }
       }
       log("DONE", "Complete", `${results.length} companies ready for outreach`, "success");
