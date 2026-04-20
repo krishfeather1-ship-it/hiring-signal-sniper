@@ -342,48 +342,55 @@ function Pipeline({ hs }) {
         log("HUB", "HubSpot", `Created company "${item.company.name}" (ID: ${coId})`, "info");
       }
 
-      // ── 2. CONTACT: search by email first, create if not found ──
-      let contactId = null;
-      if (item.dm?.name && item.dm.name !== "N/A" && item.dm.email_guess && item.dm.email_guess.includes("@")) {
+      // ── 2. CONTACTS: push ALL decision makers, not just primary ──
+      const allDms = item.dms && item.dms.length > 0 ? item.dms : [item.dm];
+      const contactIds = [];
+      for (const dm of allDms) {
+        if (!dm?.name || dm.name === "N/A" || !dm.email_guess || !dm.email_guess.includes("@")) continue;
+        let contactId = null;
         try {
           const search = await hubspot("POST", "crm/v3/objects/contacts/search", {
-            filterGroups: [{ filters: [{ propertyName: "email", operator: "EQ", value: item.dm.email_guess }] }],
+            filterGroups: [{ filters: [{ propertyName: "email", operator: "EQ", value: dm.email_guess }] }],
             limit: 1
           });
           if (search?.results?.length > 0) {
             contactId = search.results[0].id;
-            log("HUB", "HubSpot", `Contact "${item.dm.name}" already exists — updating`, "info");
+            log("HUB", "HubSpot", `Contact "${dm.name}" already exists — updating`, "info");
             await hubspot("PATCH", `crm/v3/objects/contacts/${contactId}`, {
-              properties: { jobtitle: item.dm.title || "", company: item.company.name }
+              properties: { jobtitle: dm.title || "", company: item.company.name }
             });
           }
         } catch (e) { /* search failed, create fresh */ }
 
         if (!contactId) {
-          const names = item.dm.name.trim().split(/\s+/);
+          const names = dm.name.trim().split(/\s+/);
           const contact = await hubspot("POST", "crm/v3/objects/contacts", {
             properties: {
               firstname: names[0] || "",
               lastname: names.slice(1).join(" ") || "",
-              jobtitle: item.dm.title || "",
+              jobtitle: dm.title || "",
               company: item.company.name,
-              email: item.dm.email_guess,
-              hs_content_membership_notes: truncate(item.dm.background || "", 500),
+              email: dm.email_guess,
+              hs_content_membership_notes: truncate(dm.background || "", 500),
             },
             associations: coId ? [{ to: { id: coId }, types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 1 }] }] : []
           });
           contactId = contact?.id;
-          log("HUB", "HubSpot", `Created contact "${item.dm.name}" (ID: ${contactId})`, "info");
+          log("HUB", "HubSpot", `Created contact "${dm.name}" (ID: ${contactId})`, "info");
         }
+        if (contactId) contactIds.push(contactId);
       }
 
       // ── 3. DEAL: always create new (each pipeline run = new opportunity) ──
       const savings = parseNum(item.roi?.savings);
+      const dmLines = allDms.map((d, i) => [
+        `${i === 0 ? "Primary" : "Alt"} DM: ${d.name} (${d.title})`,
+        d.email_guess ? `  Email: ${d.email_guess}` : "",
+        d.linkedin_url ? `  LinkedIn: ${d.linkedin_url}` : "",
+      ].filter(Boolean).join("\n")).join("\n");
       const desc = truncate([
-        `Decision maker: ${item.dm?.name || "TBD"} (${item.dm?.title || ""})`,
-        item.dm?.email_guess ? `Email: ${item.dm.email_guess}` : "",
-        item.dm?.linkedin_url ? `LinkedIn: ${item.dm.linkedin_url}` : "",
-        savings ? `ROI: $${Math.round(savings / 1000)}K/yr savings (${item.roi?.pct || 0}% reduction)` : "",
+        dmLines,
+        savings ? `\nROI: $${Math.round(savings / 1000)}K/yr savings (${item.roi?.pct || 0}% reduction)` : "",
         item.outreach?.email?.subject ? `\nEmail subject: ${item.outreach.email.subject}` : "",
         item.outreach?.email?.body ? `Email body: ${item.outreach.email.body}` : "",
       ].filter(Boolean).join("\n"), 2000);
@@ -400,7 +407,7 @@ function Pipeline({ hs }) {
       });
 
       setHsStatus(p => ({ ...p, [id]: "done" }));
-      log("HUB", "HubSpot", `Pushed to CRM: company + ${contactId ? "contact + " : ""}deal for ${item.company.name}`, "success");
+      log("HUB", "HubSpot", `Pushed to CRM: company + ${contactIds.length} contact${contactIds.length !== 1 ? "s" : ""} + deal for ${item.company.name}`, "success");
     } catch (err) {
       setHsStatus(p => ({ ...p, [id]: "error" }));
       log("ERR", "HubSpot", `Failed: ${item.company.name} — ${err.message}`, "error");
@@ -1212,14 +1219,20 @@ function Pipeline({ hs }) {
               <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
                 <button onClick={() => {
                   const esc = (v) => `"${String(v || "").replace(/"/g, '""')}"`;
-                  const rows = [["Company", "Industry", "Employees", "Revenue", "ICP Score", "DM Name", "DM Title", "DM Email", "DM LinkedIn", "Hiring Cost", "Feather Cost", "Savings", "Savings %", "Email Subject", "Email Body", "LinkedIn Note", "LinkedIn Followup", "Post"].join(",")];
-                  final.forEach(f => rows.push([
-                    esc(f.company.name), esc(f.company.industry || f.signal?.industry || ""), esc(f.company.employees), esc(f.company.revenue || ""),
-                    f.company.total_score || "", esc(f.dm.name), esc(f.dm.title), esc(f.dm.email_guess || ""), esc(f.dm.linkedin_url || ""),
-                    f.roi?.hiring_annual || "", f.roi?.feather_annual || "", f.roi?.savings || "", f.roi?.pct || "",
-                    esc(f.outreach?.email?.subject || ""), esc(f.outreach?.email?.body || ""),
-                    esc(f.outreach?.linkedin?.note || ""), esc(f.outreach?.linkedin?.followup || ""), esc(f.outreach?.post || "")
-                  ].join(",")));
+                  const rows = [["Company", "Industry", "Employees", "Revenue", "ICP Score", "DM Name", "DM Title", "DM Email", "DM LinkedIn", "Confidence", "Hiring Cost", "Feather Cost", "Savings", "Savings %", "Email Subject", "Email Body", "LinkedIn Note", "LinkedIn Followup", "Post"].join(",")];
+                  final.forEach(f => {
+                    const allDms = f.dms && f.dms.length > 0 ? f.dms : [f.dm];
+                    allDms.forEach((d, di) => {
+                      const dmOut = f.perDmOutreach?.find(p => p.name === d.name) || (di === 0 ? { email: f.outreach?.email, linkedin: f.outreach?.linkedin } : {});
+                      rows.push([
+                        esc(f.company.name), esc(f.company.industry || f.signal?.industry || ""), esc(f.company.employees), esc(f.company.revenue || ""),
+                        f.company.total_score || "", esc(d.name), esc(d.title), esc(d.email_guess || ""), esc(d.linkedin_url || ""),
+                        esc(d.confidence || ""), f.roi?.hiring_annual || "", f.roi?.feather_annual || "", f.roi?.savings || "", f.roi?.pct || "",
+                        esc(dmOut.email?.subject || ""), esc(dmOut.email?.body || ""),
+                        esc(dmOut.linkedin?.note || ""), esc(dmOut.linkedin?.followup || ""), esc(f.outreach?.post || "")
+                      ].join(","));
+                    });
+                  });
                   const csv = rows.join("\n");
                   const blob = new Blob([csv], { type: "text/csv" });
                   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `feather-pipeline-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
@@ -1227,7 +1240,14 @@ function Pipeline({ hs }) {
                   Export CSV
                 </button>
                 <button onClick={() => {
-                  const text = final.map(f => `## ${f.company.name}\nDM: ${f.dm.name} (${f.dm.title})\nEmail: ${f.dm.email_guess || "N/A"}\nLinkedIn: ${f.dm.linkedin_url || "N/A"}\nSavings: $${Math.round((f.roi?.savings || 0) / 1000)}K/yr\n\n### Email\nSubject: ${f.outreach?.email?.subject || ""}\n${f.outreach?.email?.body || ""}\n\n### LinkedIn Note\n${f.outreach?.linkedin?.note || ""}\n\n### LinkedIn Follow-up\n${f.outreach?.linkedin?.followup || ""}\n\n### Post\n${f.outreach?.post || ""}\n\n---`).join("\n\n");
+                  const text = final.map(f => {
+                    const allDms = f.dms && f.dms.length > 0 ? f.dms : [f.dm];
+                    const dmBlocks = allDms.map((d, di) => {
+                      const dmOut = f.perDmOutreach?.find(p => p.name === d.name) || (di === 0 ? { email: f.outreach?.email, linkedin: f.outreach?.linkedin } : {});
+                      return `### ${d.name} (${d.title})\nEmail: ${d.email_guess || "N/A"}\nLinkedIn: ${d.linkedin_url || "N/A"}\n${dmOut.email ? `\n**Email**\nSubject: ${dmOut.email.subject || ""}\n${dmOut.email.body || ""}` : ""}${dmOut.linkedin?.note ? `\n\n**LinkedIn Note**\n${dmOut.linkedin.note}` : ""}${dmOut.linkedin?.followup ? `\n\n**LinkedIn Follow-up**\n${dmOut.linkedin.followup}` : ""}`;
+                    }).join("\n\n");
+                    return `## ${f.company.name}\nSavings: $${Math.round((f.roi?.savings || 0) / 1000)}K/yr\n\n${dmBlocks}\n\n### Post\n${f.outreach?.post || ""}\n\n---`;
+                  }).join("\n\n");
                   navigator.clipboard.writeText(text);
                 }} style={{ flex: 1, padding: "8px 16px", borderRadius: 8, fontSize: 12, fontWeight: 600, background: "#fff", border: "1px solid #e5e7eb", color: "#374151" }}>
                   Copy all outreach
