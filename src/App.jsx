@@ -773,7 +773,16 @@ function Pipeline({ hs }) {
             `You are a senior B2B sales copywriter selling AI voice infrastructure to lending, mortgage, and financial services companies. You know this industry: CFPB compliance requirements, Reg F call frequency rules for collectors, TCPA consent, high agent turnover (60-80% in collections), licensing costs for loan officers. You lead with their SPECIFIC pain — not generic "AI is cool." Return ONLY valid JSON.`,
             `CONTEXT:\n- Company: ${item.company.name} (${item.company.employees} emp, ${item.company.revenue || "unknown"} rev, ${item.company.industry || item.signal?.industry || "financial services"})\n- Hiring ${item.signal?.num_openings || 8}x ${item.signal?.role_title || "phone agents"} in ${item.signal?.location || "US"}\n- Feather = AI voice agents at $0.07/min (CFPB compliant, every call recorded + transcribed)\n\nDECISION MAKERS AT THIS COMPANY:\n${dmList}\n\nINDUSTRY DATA: Mortgage LO avg $63K. Collections agent $38K. Turnover 60-80%/yr. Training $6K-$10K/head. CFPB audit trails required. Reg F: 7 calls/week max.\n\nGENERATE:\n\n1. ROI (one per company):\n   - Current: ${item.signal?.num_openings || 8} × salary × 1.35 + training + 70% turnover cost\n   - Feather: 50 calls/day × 5 min × 250 days × $0.07/min × ${item.signal?.num_openings || 8}\n\n2. For EACH DM listed above, generate personalized outreach:\n\n   a. COLD EMAIL (<100 words): Subject <50 chars. Reference their job posting. Industry-specific pain. ROI number. Close: "15 min Thursday or Friday?" Sign as "Krish" from Feather.\n\n   b. LINKEDIN CONNECTION NOTE (<300 chars — MOST IMPORTANT):\n   - If you have their LinkedIn activity: reference a SPECIFIC post or topic. "Saw your take on [topic] — [your genuine reaction]"\n   - If you have their background: reference something real (previous company, alma mater, specific experience)\n   - If neither: reference a specific, non-obvious challenge someone in their exact role faces\n   - MUST feel like you genuinely follow them. NO pitch. NO product mention. NO "love to connect." Write as a peer.\n   - GOOD: "Your point about servicing costs outpacing origination revenue was sharp — seeing the same pattern across mid-market lenders."\n   - BAD: "Hi, I run an AI voice company and would love to connect."\n\n   c. LINKEDIN FOLLOW-UP (<150 words, after accept):\n   - Callback to connection note topic\n   - Natural transition to hiring signal\n   - Casual savings number\n   - Soft 15-min ask\n\n3. LINKEDIN POST (<200 words, one per company):\n   - Hot take about AI + their vertical. Real stat. Question ending. No hashtags/emojis.\n\nReturn JSON:\n{"roi":{"hiring_annual":0,"feather_annual":0,"savings":0,"pct":0},"contacts":[{"name":"DM name","email":{"subject":"","body":""},"linkedin":{"note":"","followup":""}}],"post":""}`, false);
           const d4 = parseJSON(s4);
-          if (d4?.roi) log("ROI", "ROI", `$${Math.round((d4.roi.savings || 0) / 1000)}K/yr savings (${d4.roi.pct}%)`, "success");
+          if (!d4) log("WARN", "Parser", `Could not parse outreach JSON for ${item.company.name} — raw length: ${(s4||"").length}`, "orange");
+
+          // Normalize ROI values — model may return strings like "$255,150" instead of numbers
+          const roi = d4?.roi ? {
+            hiring_annual: parseNum(d4.roi.hiring_annual),
+            feather_annual: parseNum(d4.roi.feather_annual),
+            savings: parseNum(d4.roi.savings),
+            pct: parseNum(d4.roi.pct)
+          } : {};
+          if (roi.savings) log("ROI", "ROI", `$${Math.round(roi.savings / 1000)}K/yr savings (${roi.pct}%)`, "success");
 
           // Map per-DM outreach back — use contacts array if available, fallback to legacy
           const perDmOutreach = d4?.contacts || [];
@@ -782,7 +791,7 @@ function Pipeline({ hs }) {
           log("OK", "Pipeline", `${item.company.name} — ${perDmOutreach.length || 1} personalized outreach package${perDmOutreach.length > 1 ? "s" : ""} ready`, "success");
           results.push({
             ...item,
-            roi: d4?.roi || {},
+            roi,
             outreach: {
               email: primaryContact.email || d4?.email,
               linkedin: primaryContact.linkedin || d4?.linkedin,
